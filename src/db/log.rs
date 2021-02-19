@@ -120,6 +120,7 @@ impl LogWriter {
         if self.current_size + LOG_ENTRY_SIZE < self.max_size {
             return Ok(());
         }
+        self.file.sync_data()?;
         let next_sequence = self.sequence + 1;
         self.file = io_utils::open_writable(self.path.clone().join(&log_filename(next_sequence)))?;
         self.sequence = next_sequence;
@@ -129,9 +130,11 @@ impl LogWriter {
     pub fn append(&mut self, entry: &LogEntry) -> io::Result<()> {
         self.rotate_if_needed()?;
         entry.write_entry(&mut self.file)?;
-        self.file.sync_all()?;
         self.current_size += LOG_ENTRY_SIZE;
         Ok(())
+    }
+    pub fn sync(&mut self) -> io::Result<()> {
+        self.file.sync_data()
     }
 }
 

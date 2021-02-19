@@ -8,16 +8,27 @@ use crate::db::entry::Entry;
 use crate::db::index::{IndexReader, IndexWriter};
 use crate::db::log::{self, LogEntry, LogWriter};
 
+pub enum SyncMode {
+    #[allow(dead_code)]
+    Paranoid,
+    #[allow(dead_code)]
+    Never,
+    #[allow(dead_code)]
+    Every(u16),
+}
+
 pub struct TableWriter {
     data_writer: DataWriter,
     index_writer: IndexWriter,
     log_writer: LogWriter,
     last_log_entry: LogEntry,
+    sync_mode: SyncMode,
+    writes: u64,
 }
 
 impl TableWriter {
     #[allow(dead_code)]
-    pub fn create<P: AsRef<Path>>(path: P) -> io::Result<TableWriter> {
+    pub fn create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<TableWriter> {
         create_dir_all(path.as_ref())?;
         let last_entry = match log::read_last_log_entry(path.as_ref())? {
             Some(entry) => entry,
@@ -34,7 +45,23 @@ impl TableWriter {
             index_writer: IndexWriter::open(path.as_ref(), last_entry.index_offset)?,
             log_writer: log_writer,
             last_log_entry: last_entry,
+            sync_mode: sync_mode,
+            writes: 0,
         })
+    }
+    fn fsync(&mut self) -> io::Result<()> {
+        self.writes += 1;
+        let should_sync = match self.sync_mode {
+            SyncMode::Paranoid => true,
+            SyncMode::Every(p) if p > 0 && self.writes % p as u64 == 0 => true,
+            _ => false
+        };
+        if should_sync {
+            self.data_writer.sync()?;
+            self.index_writer.sync()?;
+            self.log_writer.sync()?;
+        }
+        Ok(())
     }
     #[allow(dead_code)]
     pub fn append_batch(&mut self, batch: &[Entry]) -> io::Result<()> {
@@ -54,7 +81,7 @@ impl TableWriter {
         };
         self.log_writer.append(&last_log_entry)?;
         self.last_log_entry = last_log_entry;
-        Ok(())
+        self.fsync()
     }
 }
 
@@ -166,7 +193,7 @@ mod table_test {
             Entry { ts: 140, value: 1140.0 },
         ];
         {
-            let mut writer = TableWriter::create(&db_dir.path).unwrap();
+            let mut writer = TableWriter::create(&db_dir.path, SyncMode::Never).unwrap();
             writer.append_batch(&entries[0..5]).unwrap();
             writer.append_batch(&entries[5..8]).unwrap();
             writer.append_batch(&entries[8..11]).unwrap();
@@ -187,7 +214,7 @@ mod table_test {
         );
 
         {
-            let mut writer = TableWriter::create(&db_dir.path).unwrap();
+            let mut writer = TableWriter::create(&db_dir.path, SyncMode::Never).unwrap();
             writer.append_batch(&entries[11..13]).unwrap();
         }
 
