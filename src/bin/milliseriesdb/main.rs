@@ -1,4 +1,4 @@
-use milliseriesdb::db::{Entry, DB, SyncMode};
+use milliseriesdb::db::{Entry, Series, SyncMode};
 use std::env;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
@@ -7,7 +7,7 @@ use flate2::read::GzDecoder;
 
 fn append(db_path: &str, input_csv: &str) -> io::Result<()> {
     fn append_internal<R: BufRead>(db_path: &str, reader: R) -> io::Result<()> {
-        let mut db = DB::open_or_create(db_path, SyncMode::Every(1000))?;
+        let mut db = Series::open_or_create(db_path, SyncMode::Every(1000))?;
         let mut buffer = Vec::new();
         let batch_size = 100;
         for entry in reader.lines() {
@@ -46,7 +46,7 @@ fn append(db_path: &str, input_csv: &str) -> io::Result<()> {
 }
 
 fn export(db_path: &str, output_csv: &str, from_ts: u64) -> io::Result<()> {
-    let mut db = DB::open_or_create(db_path, SyncMode::Never)?;
+    let mut db = Series::open_or_create(db_path, SyncMode::Never)?;
     let mut writer = BufWriter::new(File::create(output_csv)?);
     for entry in db.iterator(from_ts)? {
         let entry = entry?;
