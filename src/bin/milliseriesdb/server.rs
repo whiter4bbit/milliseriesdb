@@ -147,14 +147,3 @@ pub async fn start_server(db: DB, addr: SocketAddr) -> io::Result<()> {
 
     Ok(warp::serve(server_api).run(addr).await)
 }
-
-// #[tokio::main]
-// async fn main() {
-//     let mut args = env::args();
-//     args.next();
-
-//     match (args.next(), args.next().and_then(|port| port.parse::<u16>().ok())) {
-//         (Some(base_path), Some(port)) => start_server(base_path, port).await.unwrap(),
-//         _ => exit(1),
-//     }
-// }
