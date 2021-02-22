@@ -1,80 +1,94 @@
-use milliseriesdb::db::{Entry, Series, SyncMode};
-use std::env;
-use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, Write};
-use std::process::exit;
-use flate2::read::GzDecoder;
+use clap::{App, AppSettings, Arg, SubCommand};
+use milliseriesdb::db::{SyncMode, DB};
 
-fn append(db_path: &str, input_csv: &str) -> io::Result<()> {
-    fn append_internal<R: BufRead>(db_path: &str, reader: R) -> io::Result<()> {
-        let mut db = Series::open_or_create(db_path, SyncMode::Every(1000))?;
-        let mut buffer = Vec::new();
-        let batch_size = 100;
-        for entry in reader.lines() {
-            let entry = entry?;
-            let mut tokens = entry.split(';');
-            match (tokens.next(), tokens.next()) {
-                (Some(timestamp), Some(value)) => {
-                    let entry = timestamp.trim().parse::<u64>().ok().and_then(|timestamp| {
-                        value.trim().parse::<f64>().ok().map(|value| Entry {
-                            ts: timestamp,
-                            value: value,
-                        })
-                    });
-                    if entry.is_some() {
-                        buffer.push(entry.unwrap());
-                    }
-                    if buffer.len() == batch_size {
-                        db.append(&buffer)?;
-                        buffer.clear();
-                    }
-                }
-                _ => {}
-            }
+mod append;
+mod export;
+mod server;
+
+#[tokio::main]
+async fn main() {
+    let matches = App::new("milliseriesdb")
+        .setting(AppSettings::SubcommandRequiredElseHelp)
+        .arg(
+            Arg::with_name("path")
+                .short("p")
+                .required(true)
+                .takes_value(true)
+                .help("path to database"),
+        )
+        .subcommand(
+            SubCommand::with_name("append")
+                .about("appends entries to the series")
+                .arg(
+                    Arg::with_name("series")
+                        .short("s")
+                        .required(true)
+                        .takes_value(true)
+                        .help("id of the series"),
+                )
+                .arg(
+                    Arg::with_name("csv")
+                        .short("c")
+                        .required(true)
+                        .takes_value(true)
+                        .help("path to csv (timestamp; value)"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("export")
+                .about("export entries from series")
+                .arg(
+                    Arg::with_name("series")
+                        .short("s")
+                        .required(true)
+                        .takes_value(true)
+                        .help("id of the series"),
+                )
+                .arg(
+                    Arg::with_name("csv")
+                        .short("c")
+                        .required(true)
+                        .takes_value(true)
+                        .help("export destination"),
+                )
+                .arg(
+                    Arg::with_name("from")
+                        .short("f")
+                        .required(true)
+                        .takes_value(true)
+                        .default_value("0")
+                        .help("from timestamp"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("server").about("start rest server").arg(
+                Arg::with_name("addr")
+                    .short("a")
+                    .required(true)
+                    .takes_value(true)
+                    .help("listen address '127.0.0.1:8080'"),
+            ),
+        )
+        .get_matches();
+
+    let mut db = DB::open(matches.value_of("path").unwrap(), SyncMode::Every(100)).unwrap();
+
+    match matches.subcommand() {
+        ("append", Some(sub_match)) => {
+            append::append(&mut db, sub_match.value_of("series").unwrap(), sub_match.value_of("csv").unwrap()).unwrap()
         }
-        if !buffer.is_empty() {
-            db.append(&buffer)?;
+        ("export", Some(sub_match)) => {
+            export::export(
+                &mut db,
+                sub_match.value_of("series").unwrap(),
+                sub_match.value_of("csv").unwrap(),
+                sub_match.value_of("from").and_then(|from| from.parse::<u64>().ok()).unwrap(),
+            )
+            .unwrap();
         }
-        Ok(())    
-    }
-    
-    if input_csv.ends_with(".gz") {
-        append_internal(db_path, BufReader::new(GzDecoder::new(File::open(input_csv)?)?))
-    } else {
-        append_internal(db_path, BufReader::new(File::open(input_csv)?))        
-    }
-}
-
-fn export(db_path: &str, output_csv: &str, from_ts: u64) -> io::Result<()> {
-    let mut db = Series::open_or_create(db_path, SyncMode::Never)?;
-    let mut writer = BufWriter::new(File::create(output_csv)?);
-    for entry in db.iterator(from_ts)? {
-        let entry = entry?;
-        writer.write(format!("{}; {:.2}\n", entry.ts, entry.value).as_bytes())?;
-    }
-    Ok(())
-}
-
-fn help_and_exit() {
-    exit(1);
-}
-
-fn main() {
-    let mut args = env::args();
-    args.next();
-
-    match args.next() {
-        Some(command) => match command.as_ref() {
-            "append" => match (args.next(), args.next()) {
-                (Some(db_path), Some(input_csv)) => append(&db_path, &input_csv).unwrap(),
-                _ => help_and_exit(),
-            },
-            "export" => match (args.next(), args.next(), args.next().and_then(|ts| ts.parse::<u64>().ok())) {
-                (Some(db_path), Some(output_csv), Some(from_ts)) => export(&db_path, &output_csv, from_ts).unwrap(),
-                _ => help_and_exit(),
-            }
-            _ => help_and_exit(),
-        },
-        _ => help_and_exit(),
+        ("server", Some(sub_match)) => server::start_server(db, sub_match.value_of("addr").unwrap().parse().unwrap())
+            .await
+            .unwrap(),
+        _ => unreachable!(),
     }
 }
