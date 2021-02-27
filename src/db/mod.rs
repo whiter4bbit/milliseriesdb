@@ -5,12 +5,15 @@ mod index;
 mod io_utils;
 mod log;
 mod series;
+mod executor;
+mod utils;
 
 #[cfg(test)]
 mod test_utils;
 
 pub use entry::Entry;
 pub use series::{Series, SyncMode};
+pub use executor::{Query, QueryExpression, Executor, Row};
 use std::collections::HashMap;
 use std::fs::create_dir_all;
 use std::io;

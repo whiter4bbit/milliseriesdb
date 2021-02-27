@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
 use std::fs::create_dir_all;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use super::data::{DataReader, DataWriter};
 use super::entry::Entry;
 use super::index::{IndexReader, IndexWriter};
 use super::log::{self, LogEntry, LogWriter};
+use super::utils::IntoEntriesIterator;
 
 #[derive(Copy, Clone)]
 pub enum SyncMode {
@@ -206,6 +207,20 @@ impl Series {
     pub fn iterator(&self, from_ts: u64) -> io::Result<SeriesIterator> {
         let mut reader = SeriesReader::create(&self.path)?;
         reader.iterator(from_ts)
+    }
+}
+
+impl IntoEntriesIterator for Series {
+    type Iter = SeriesIterator;
+    fn into_iter(&self, from: u64) -> io::Result<Self::Iter> {
+        self.iterator(from)
+    }
+}
+
+impl IntoEntriesIterator for Arc<Series> {
+    type Iter = SeriesIterator;
+    fn into_iter(&self, from: u64) -> io::Result<Self::Iter> {
+        self.iterator(from)
     }
 }
 
