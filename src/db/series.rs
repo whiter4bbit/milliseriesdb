@@ -9,6 +9,7 @@ use super::entry::Entry;
 use super::index::{IndexReader, IndexWriter};
 use super::log::{self, LogEntry, LogWriter};
 use super::utils::IntoEntriesIterator;
+use super::Compression;
 
 #[derive(Copy, Clone)]
 pub enum SyncMode {
@@ -31,7 +32,7 @@ pub struct SeriesWriter {
 
 impl SeriesWriter {
     #[allow(dead_code)]
-    pub fn create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<SeriesWriter> {
+    pub fn create<P: AsRef<Path>>(path: P, sync_mode: SyncMode, compression: Compression) -> io::Result<SeriesWriter> {
         create_dir_all(path.as_ref())?;
         let last_entry = match log::read_last_log_entry(path.as_ref())? {
             Some(entry) => entry,
@@ -45,7 +46,7 @@ impl SeriesWriter {
         log_writer.append(&last_entry)?;
         log_writer.sync()?;
         Ok(SeriesWriter {
-            data_writer: DataWriter::create(path.as_ref(), last_entry.data_offset)?,
+            data_writer: DataWriter::create(path.as_ref(), last_entry.data_offset, compression)?,
             index_writer: IndexWriter::open(path.as_ref(), last_entry.index_offset)?,
             log_writer: log_writer,
             last_log_entry: last_entry,
@@ -192,10 +193,10 @@ pub struct Series {
 
 impl Series {
     #[allow(dead_code)]
-    pub fn open_or_create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<Series> {
+    pub fn open_or_create<P: AsRef<Path>>(path: P, sync_mode: SyncMode, compression: Compression) -> io::Result<Series> {
         Ok(Series {
             writer: SeriesWriterGuard {
-                writer: Arc::new(Mutex::new(SeriesWriter::create(path.as_ref(), sync_mode)?)),
+                writer: Arc::new(Mutex::new(SeriesWriter::create(path.as_ref(), sync_mode, compression)?)),
             },
             path: path.as_ref().to_path_buf(),
         })
@@ -249,7 +250,7 @@ mod test {
             Entry { ts: 140, value: 1140.0 },
         ];
         {
-            let mut writer = SeriesWriter::create(&db_dir.path, SyncMode::Never).unwrap();
+            let mut writer = SeriesWriter::create(&db_dir.path, SyncMode::Never, Compression::None).unwrap();
             writer.append_batch(&entries[0..5]).unwrap();
             writer.append_batch(&entries[5..8]).unwrap();
             writer.append_batch(&entries[8..11]).unwrap();
@@ -270,7 +271,7 @@ mod test {
         );
 
         {
-            let mut writer = SeriesWriter::create(&db_dir.path, SyncMode::Never).unwrap();
+            let mut writer = SeriesWriter::create(&db_dir.path, SyncMode::Never, Compression::None).unwrap();
             writer.append_batch(&entries[11..13]).unwrap();
         }
 

@@ -10,6 +10,34 @@ use super::io_utils::{self, ReadBytes, WriteBytes};
 
 const BLOCK_HEADER_SIZE: u64 = 4 + 1 + 4;
 
+struct BlockHeader {
+    entries_count: usize,
+    compression: Compression,
+    payload_size: usize,
+}
+
+impl BlockHeader {
+    fn read(file: &mut File) -> io::Result<BlockHeader> {
+        let entries_count = file.read_u32()? as usize;
+        let compression = match Compression::from_marker(file.read_u8()?) {
+            Some(compression) => compression,
+            None => return Err(io::Error::new(io::ErrorKind::Other, "Unknown compression format")),
+        };
+        let payload_size = file.read_u32()? as usize;
+        Ok(BlockHeader {
+            entries_count: entries_count,
+            compression: compression,
+            payload_size: payload_size,
+        })
+    }
+    fn write(&self, file: &mut File) -> io::Result<()> {
+        file.write_u32(&(self.entries_count as u32))?;
+        file.write_u8(&(self.compression.marker()))?;
+        file.write_u32(&(self.payload_size as u32))?;
+        Ok(())
+    }
+}
+
 pub struct DataWriter {
     file: File,
     offset: u64,
@@ -18,7 +46,7 @@ pub struct DataWriter {
 }
 
 impl DataWriter {
-    pub fn create<P: AsRef<Path>>(path: P, offset: u64) -> io::Result<DataWriter> {
+    pub fn create<P: AsRef<Path>>(path: P, offset: u64, compression: Compression) -> io::Result<DataWriter> {
         let mut file = io_utils::open_writable(path.as_ref().join("series.dat"))?;
         file.seek(SeekFrom::Start(offset))?;
 
@@ -26,7 +54,7 @@ impl DataWriter {
             file: file,
             offset: offset,
             buffer: Cursor::new(Vec::new()),
-            compression: Compression::Deflate,
+            compression: compression,
         })
     }
     pub fn append(&mut self, block: &[&Entry]) -> io::Result<u64> {
@@ -35,9 +63,12 @@ impl DataWriter {
 
         let block_size = self.buffer.position();
 
-        self.file.write_u32(&(block.len() as u32))?;
-        self.file.write_u8(&(self.compression.marker()))?;
-        self.file.write_u32(&(block_size as u32))?;
+        BlockHeader {
+            entries_count: block.len(),
+            compression: self.compression.clone(),
+            payload_size: block_size as usize,
+        }.write(&mut self.file)?;
+        
         self.file.write_all(&self.buffer.get_ref()[0..block_size as usize])?;
 
         self.offset += block_size + BLOCK_HEADER_SIZE;
@@ -50,33 +81,32 @@ impl DataWriter {
 
 pub struct DataReader {
     file: File,
+    buffer: Vec<u8>,
 }
 
 impl DataReader {
     pub fn create<P: AsRef<Path>>(path: P, _: u64) -> io::Result<DataReader> {
         Ok(DataReader {
             file: io_utils::open_readable(path.as_ref().join("series.dat"))?,
+            buffer: Vec::new(),
         })
     }
     pub fn read_block(&mut self, offset: u64, destination: &mut Vec<Entry>) -> io::Result<u64> {
         self.file.seek(SeekFrom::Start(offset))?;
-        let entries_count = self.file.read_u32()? as usize;
-
-        let compression = match Compression::from_marker(self.file.read_u8()?) {
-            Some(compression) => compression,
-            None => return Err(io::Error::new(io::ErrorKind::Other, "Unknown compression format")),
-        };
-
-        let block_size = self.file.read_u32()? as usize;
-
-        let mut block = vec![0u8; block_size];
-        self.file.read_exact(&mut block)?;
         
-        let mut reader = Cursor::new(&block);
-        for entry in compression.read(&mut reader, entries_count as usize)? {
+        let header = BlockHeader::read(&mut self.file)?;
+
+        while self.buffer.len() < header.payload_size {
+            self.buffer.push(0u8);
+        }
+
+        self.file.read_exact(&mut self.buffer[0..header.payload_size])?;
+        
+        let mut reader = Cursor::new(&self.buffer);
+        for entry in header.compression.read(&mut reader, header.entries_count)? {
             destination.push(entry);
         }
-        Ok(offset + block_size as u64 + BLOCK_HEADER_SIZE)
+        Ok(offset + header.payload_size as u64 + BLOCK_HEADER_SIZE)
     }
 }
 
@@ -96,7 +126,7 @@ mod test {
             Entry { ts: 5, value: 51.0 },
         ];
 
-        let mut writer = DataWriter::create(&db_dir.path, 0).unwrap();
+        let mut writer = DataWriter::create(&db_dir.path, 0, Compression::None).unwrap();
         let offset_block0 = 0u64;
         let offset_block1 = writer.append(&entries[0..3].iter().collect::<Vec<&Entry>>()).unwrap();
         let offset_block2 = writer.append(&entries[3..5].iter().collect::<Vec<&Entry>>()).unwrap();
