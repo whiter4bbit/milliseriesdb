@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::SeekFrom;
-use std::io::{self, Cursor};
+use std::io::{self, Cursor, SeekFrom, BufReader};
 use std::path::Path;
 
 use super::compression::Compression;
@@ -17,7 +16,7 @@ struct BlockHeader {
 }
 
 impl BlockHeader {
-    fn read(file: &mut File) -> io::Result<BlockHeader> {
+    fn read<R: Read>(file: &mut R) -> io::Result<BlockHeader> {
         let entries_count = file.read_u32()? as usize;
         let compression = match Compression::from_marker(file.read_u8()?) {
             Some(compression) => compression,
@@ -80,7 +79,7 @@ impl DataWriter {
 }
 
 pub struct DataReader {
-    file: File,
+    file: BufReader<File>,
     buffer: Vec<u8>,
     offset: u64,
 }
@@ -90,7 +89,7 @@ impl DataReader {
         let mut file = io_utils::open_readable(path.as_ref().join("series.dat"))?;
         file.seek(SeekFrom::Start(start_offset))?;
         Ok(DataReader {
-            file: file,
+            file: BufReader::with_capacity(2 * 1024 * 1024, file),
             buffer: Vec::new(),
             offset: start_offset,
         })
@@ -127,8 +126,7 @@ mod test {
         ];
 
         let mut writer = DataWriter::create(&db_dir.path, 0, Compression::None).unwrap();
-        let offset_block0 = 0u64;
-        let offset_block1 = writer.append(&entries[0..3].iter().collect::<Vec<&Entry>>()).unwrap();
+        writer.append(&entries[0..3].iter().collect::<Vec<&Entry>>()).unwrap();
         let offset_block2 = writer.append(&entries[3..5].iter().collect::<Vec<&Entry>>()).unwrap();
 
         {
