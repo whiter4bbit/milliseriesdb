@@ -142,7 +142,7 @@ pub struct SeriesIterator {
 
 impl SeriesIterator {
     fn fetch_block(&mut self) -> io::Result<()> {
-        while self.offset < self.size {
+        if self.offset < self.size {
             let mut block = Vec::new();
             self.offset = self.data_reader.read_block(&mut block)?;
 
