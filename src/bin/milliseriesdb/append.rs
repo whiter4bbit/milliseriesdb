@@ -21,32 +21,25 @@ impl FromStr for CsvEntry {
 }
 
 pub fn append(db: &mut DB, series_id: &str, input_csv: &str, batch_size: usize) -> io::Result<()> {
-    fn append_internal(db: &mut DB, series_id: &str, batch_size: usize, reader: Box<dyn BufRead>) -> io::Result<()> {
-        let series = db.create_series(series_id)?;
-        let mut writer = series.writer();
-        let mut buffer = Vec::new();
-        for entry in reader.lines() {
-            let CsvEntry(ts, val) = entry?.parse::<CsvEntry>()?;
-            buffer.push(Entry { ts: ts, value: val });
-            if buffer.len() == batch_size {
-                writer.append(&buffer)?;
-                buffer.clear();
-            }
-        }
-        if !buffer.is_empty() {
-            writer.append(&buffer)?;
-        }
-        Ok(())
-    }
+    let reader: Box<dyn BufRead> = if input_csv.ends_with(".gz") {
+        Box::new(BufReader::new(GzDecoder::new(File::open(input_csv)?)?))
+    } else {
+        Box::new(BufReader::new(File::open(input_csv)?))
+    };
 
-    append_internal(
-        db,
-        series_id,
-        batch_size,
-        if input_csv.ends_with(".gz") {
-            Box::new(BufReader::new(GzDecoder::new(File::open(input_csv)?)?))
-        } else {
-            Box::new(BufReader::new(File::open(input_csv)?))
-        },
-    )
+    let series = db.create_series(series_id)?;
+    let mut writer = series.writer();
+    let mut buffer = Vec::new();
+    for entry in reader.lines() {
+        let CsvEntry(ts, val) = entry?.parse::<CsvEntry>()?;
+        buffer.push(Entry { ts: ts, value: val });
+        if buffer.len() == batch_size {
+            writer.append(&buffer)?;
+            buffer.clear();
+        }
+    }
+    if !buffer.is_empty() {
+        writer.append(&buffer)?;
+    }
+    Ok(())
 }

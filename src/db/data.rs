@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::{self, Cursor, SeekFrom, BufReader};
+use std::io::{self, BufReader, Cursor, SeekFrom};
 use std::path::Path;
 
 use super::compression::Compression;
@@ -85,25 +85,23 @@ pub struct DataReader {
 }
 
 impl DataReader {
-    pub fn create<P: AsRef<Path>>(path: P, start_offset: u64, _: u64) -> io::Result<DataReader> {
+    pub fn create<P: AsRef<Path>>(path: P, start_offset: u64) -> io::Result<DataReader> {
         let mut file = io_utils::open_readable(path.as_ref().join("series.dat"))?;
         file.seek(SeekFrom::Start(start_offset))?;
         Ok(DataReader {
             file: BufReader::with_capacity(2 * 1024 * 1024, file),
-            buffer: Vec::new(),
+            buffer: vec![0u8; 1024 * 1024],
             offset: start_offset,
         })
     }
-    pub fn read_block(&mut self, destination: &mut Vec<Entry>) -> io::Result<u64> {
+    pub fn read_block<D: Extend<Entry>>(&mut self, destination: &mut D) -> io::Result<u64> {
         let header = BlockHeader::read(&mut self.file)?;
         while self.buffer.len() < header.payload_size {
             self.buffer.push(0u8);
         }
         self.file.read_exact(&mut self.buffer[0..header.payload_size])?;
         let mut reader = Cursor::new(&self.buffer);
-        for entry in header.compression.read(&mut reader, header.entries_count)? {
-            destination.push(entry);
-        }
+        destination.extend(header.compression.read(&mut reader, header.entries_count)?);
         self.offset += header.payload_size as u64 + BLOCK_HEADER_SIZE;
         Ok(self.offset)
     }
@@ -130,7 +128,7 @@ mod test {
         let offset_block2 = writer.append(&entries[3..5].iter().collect::<Vec<&Entry>>()).unwrap();
 
         {
-            let mut reader = DataReader::create(&db_dir.path, 0, offset_block2).unwrap();
+            let mut reader = DataReader::create(&db_dir.path, 0).unwrap();
             let mut result: Vec<Entry> = Vec::new();
 
             reader.read_block(&mut result).unwrap();

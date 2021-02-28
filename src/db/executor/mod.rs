@@ -3,16 +3,26 @@ mod query;
 
 use super::utils::IntoEntriesIterator;
 use super::Entry;
-use agg::{Aggregation, AggregatorState};
-pub use query::{Query, QueryExpression};
+use agg::{Aggregator, Aggregation, AggregatorState};
+pub use query::{QueryExpression};
 use serde_derive::{Deserialize, Serialize};
 use std::io;
+use std::time::SystemTime;
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Row {
     pub ts: u64,
     pub values: Vec<Aggregation>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct Query {
+    from: u64,
+    group_by: u64,
+    aggregators: Vec<Aggregator>,
+    limit: usize,
 }
 
 pub struct Executor {
@@ -46,6 +56,8 @@ impl Executor {
     where
         I: IntoEntriesIterator,
     {
+        let start_ts = SystemTime::now();
+        
         let mut rows = Vec::new();
         let mut scanned = 0usize;
         for entry in series.into_iter(self.from)? {
@@ -77,7 +89,7 @@ impl Executor {
                 values: self.state.iter_mut().map(|state| state.pop()).collect(),
             })
         }
-        println!("Scanned {} entries", scanned);
+        log::debug!("Scanned {} entries in {}ms", scanned, start_ts.elapsed().unwrap().as_millis());
         Ok(rows)
     }
 }

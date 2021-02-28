@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, SeekFrom};
 use std::path::Path;
+use std::time::SystemTime;
 
 const INDEX_ENTRY_LENGTH: u64 = 16u64;
 
@@ -45,6 +46,9 @@ impl IndexReader {
     }
 
     pub fn ceiling_offset(&mut self, target_ts: u64) -> io::Result<Option<u64>> {
+        let start_ts = SystemTime::now();
+        let mut scanned = 0usize;
+
         let mut buf = [8u8; 8];
 
         let mut lo = 0i128;
@@ -53,6 +57,8 @@ impl IndexReader {
             let m = lo + (hi - lo) / 2;
 
             let ts = {
+                scanned += 1;
+                
                 self.file.seek(SeekFrom::Start(m as u64 * INDEX_ENTRY_LENGTH))?;
                 self.file.read_exact(&mut buf)?;
 
@@ -66,15 +72,21 @@ impl IndexReader {
             }
         }
 
-        Ok(match (lo as u64) < self.entries {
+        let result = Ok(match (lo as u64) < self.entries {
             true => {
+                scanned += 1;
+
                 self.file.seek(SeekFrom::Start(lo as u64 * INDEX_ENTRY_LENGTH + 8))?;
                 self.file.read_exact(&mut buf)?;
 
                 Some(u64::from_be_bytes(buf))
             }
             _ => None,
-        })
+        });
+
+        log::debug!("Index scanned {} entries took {}us", scanned, start_ts.elapsed().unwrap().as_micros());
+        
+        result
     }
 }
 

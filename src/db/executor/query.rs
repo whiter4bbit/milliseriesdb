@@ -1,16 +1,8 @@
 use super::agg::Aggregator;
+use super::Query;
 use std::convert::TryFrom;
 use std::str::FromStr;
 use serde_derive::{Deserialize, Serialize};
-
-#[allow(dead_code)]
-#[derive(Debug, PartialEq, Eq)]
-pub struct Query {
-    pub from: u64,
-    pub group_by: u64,
-    pub aggregators: Vec<Aggregator>,
-    pub limit: usize,
-}
 
 #[derive(Deserialize, Serialize)]
 #[derive(Debug)]
