@@ -1,9 +1,10 @@
-use milliseriesdb::db::{Entry, DB, Executor, Row, Query, QueryExpression};
+use milliseriesdb::db::{Aggregation, Entry, Executor, Query, QueryExpr, Row, DB};
 use serde_derive::{Deserialize, Serialize};
-use std::convert::{TryFrom, Infallible};
+use std::convert::{Infallible, TryFrom};
 use std::io;
 use std::net::SocketAddr;
 use warp::{http::StatusCode, Filter};
+use chrono::{Utc, TimeZone};
 
 struct DBVar {
     db: DB,
@@ -16,27 +17,34 @@ impl DBVar {
     }
 }
 
-#[derive(Deserialize, Serialize)]
-pub struct JsonEntry {
-    pub timestamp: u64,
-    pub value: f64,
-}
-
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub struct JsonEntries {
-    pub entries: Vec<JsonEntry>,
+    pub entries: Vec<Entry>,
 }
 
-impl JsonEntries {
-    pub fn to_entries(&self) -> Vec<Entry> {
-        self.entries
-            .iter()
-            .map(|json| Entry {
-                ts: json.timestamp,
-                value: json.value,
-            })
-            .collect()
+#[derive(Serialize)]
+pub struct JsonRows {
+    pub rows: Vec<JsonRow>,
+}
+
+impl JsonRows {
+    fn from_rows(rows: Vec<Row>) -> JsonRows {
+        JsonRows {
+            rows: rows
+                .into_iter()
+                .map(|row| JsonRow {
+                    timestamp: Utc.timestamp_millis(row.ts as i64).to_string(),
+                    values: row.values,
+                })
+                .collect(),
+        }
     }
+}
+
+#[derive(Serialize)]
+pub struct JsonRow {
+    pub timestamp: String,
+    pub values: Vec<Aggregation>,
 }
 
 mod handlers {
@@ -53,7 +61,7 @@ mod handlers {
         let result = tokio::task::spawn_blocking(move || match db.clone().get_series(id) {
             Ok(Some(series)) => {
                 let mut writer = series.writer();
-                writer.append(&entries.to_entries())?;
+                writer.append(&entries.entries)?;
                 Ok(Some(()))
             }
             Ok(None) => Ok(None),
@@ -66,7 +74,7 @@ mod handlers {
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         })
     }
-    pub async fn query_handler(id: String, query_expr: QueryExpression, db: DB) -> Result<Box<dyn warp::Reply>, Infallible> {
+    pub async fn query_handler(id: String, query_expr: QueryExpr, db: DB) -> Result<Box<dyn warp::Reply>, Infallible> {
         fn query_internal(id: String, query: Query, db: DB) -> io::Result<Option<Vec<Row>>> {
             match db.clone().get_series(id)? {
                 Some(series) => Ok(Some(Executor::new(&query).execute(series)?)),
@@ -78,7 +86,7 @@ mod handlers {
                 let result = tokio::task::spawn_blocking(move || query_internal(id, query, db));
                 match result.await {
                     Ok(Ok(None)) => Box::new(StatusCode::NOT_FOUND),
-                    Ok(Ok(Some(rows))) => Box::new(warp::reply::json(&rows)),
+                    Ok(Ok(Some(rows))) => Box::new(warp::reply::json(&JsonRows::from_rows(rows))),
                     _ => Box::new(StatusCode::INTERNAL_SERVER_ERROR),
                 }
             }
@@ -103,7 +111,7 @@ pub async fn start_server(db: DB, addr: SocketAddr) -> io::Result<()> {
 
     let query_series = warp::path!("series" / String)
         .and(warp::get())
-        .and(warp::query::<QueryExpression>())
+        .and(warp::query::<QueryExpr>())
         .and(db.with_db())
         .and_then(handlers::query_handler);
 

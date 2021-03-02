@@ -515,6 +515,7 @@ name = "milliseriesdb"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "chrono",
  "clap",
  "flate2",
  "http",

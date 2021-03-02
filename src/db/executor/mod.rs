@@ -1,10 +1,11 @@
 mod agg;
-mod query;
+mod query_expr;
 
 use super::utils::IntoEntriesIterator;
 use super::Entry;
-use agg::{Aggregator, Aggregation, AggregatorState};
-pub use query::{QueryExpression};
+use agg::{Aggregator, AggregatorState};
+pub use query_expr::QueryExpr;
+pub use agg::Aggregation;
 use serde_derive::{Deserialize, Serialize};
 use std::io;
 use std::time::SystemTime;
