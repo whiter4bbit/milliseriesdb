@@ -58,15 +58,18 @@ mod handlers {
         })
     }
     pub async fn append_handler(id: String, entries: JsonEntries, db: DB) -> Result<impl warp::Reply, Infallible> {
-        let result = tokio::task::spawn_blocking(move || match db.clone().get_series(id) {
-            Ok(Some(series)) => {
-                let mut writer = series.writer();
-                writer.append(&entries.entries, Compression::Delta)?;
-                Ok(Some(()))
-            }
-            Ok(None) => Ok(None),
-            Err(err) => Err(err),
-        });
+        fn append_internal(id: String, entries: JsonEntries, db: DB) -> io::Result<Option<()>> {
+            match db.clone().get_series(id) {
+                Some(series) => {
+                    let mut writer = series.writer();
+                    writer.append(&entries.entries, Compression::Delta)?;
+                    Ok(Some(()))
+                }
+                None => Ok(None),
+            }            
+        }
+
+        let result = tokio::task::spawn_blocking(move || append_internal(id, entries, db));
 
         Ok(match result.await {
             Ok(Ok(Some(_))) => StatusCode::OK,
@@ -76,7 +79,7 @@ mod handlers {
     }
     pub async fn query_handler(id: String, query_expr: QueryExpr, db: DB) -> Result<Box<dyn warp::Reply>, Infallible> {
         fn query_internal(id: String, query: Query, db: DB) -> io::Result<Option<Vec<Row>>> {
-            match db.clone().get_series(id)? {
+            match db.clone().get_series(id) {
                 Some(series) => Ok(Some(Executor::new(&query).execute(series)?)),
                 None => Ok(None),
             }
