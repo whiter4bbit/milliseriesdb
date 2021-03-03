@@ -41,11 +41,10 @@ pub struct DataWriter {
     file: File,
     offset: u64,
     buffer: Cursor<Vec<u8>>,
-    compression: Compression,
 }
 
 impl DataWriter {
-    pub fn create<P: AsRef<Path>>(path: P, offset: u64, compression: Compression) -> io::Result<DataWriter> {
+    pub fn create<P: AsRef<Path>>(path: P, offset: u64) -> io::Result<DataWriter> {
         let mut file = io_utils::open_writable(path.as_ref().join("series.dat"))?;
         file.seek(SeekFrom::Start(offset))?;
 
@@ -53,18 +52,17 @@ impl DataWriter {
             file: file,
             offset: offset,
             buffer: Cursor::new(Vec::new()),
-            compression: compression,
         })
     }
-    pub fn append(&mut self, block: &[&Entry]) -> io::Result<u64> {
+    pub fn append(&mut self, block: &[&Entry], compression: Compression) -> io::Result<u64> {
         self.buffer.set_position(0);
-        self.compression.write(block, &mut self.buffer)?;
+        compression.write(block, &mut self.buffer)?;
 
         let block_size = self.buffer.position();
 
         BlockHeader {
             entries_count: block.len(),
-            compression: self.compression.clone(),
+            compression: compression.clone(),
             payload_size: block_size as usize,
         }
         .write(&mut self.file)?;
@@ -118,9 +116,9 @@ mod test {
             Entry { ts: 5, value: 51.0 },
         ];
 
-        let mut writer = DataWriter::create(&db_dir.path, 0, Compression::Deflate).unwrap();
-        writer.append(&entries[0..3].iter().collect::<Vec<&Entry>>()).unwrap();
-        writer.append(&entries[3..5].iter().collect::<Vec<&Entry>>()).unwrap();
+        let mut writer = DataWriter::create(&db_dir.path, 0).unwrap();
+        writer.append(&entries[0..3].iter().collect::<Vec<&Entry>>(), Compression::Deflate).unwrap();
+        writer.append(&entries[3..5].iter().collect::<Vec<&Entry>>(), Compression::Deflate).unwrap();
 
         {
             let mut reader = DataReader::create(&db_dir.path, 0).unwrap();

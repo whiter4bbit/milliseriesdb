@@ -11,13 +11,13 @@ async fn main() {
 
     let matches = clap_app!(milliseriesdb =>
         (@setting SubcommandRequiredElseHelp)
-        (@arg path: -p <PATH> --path "path to database")
-        (@arg compression: -i <COMPRESSION> --compression default_value("deflate") possible_value[none deflate delta] "compression")
+        (@arg path: -p <PATH> --path "path to database")        
         (@subcommand append =>
             (about: "append entries to the series")
             (@arg series: -s <SERIES> --series "id of the series")
             (@arg csv: -c <CSV> --csv "path to csv (timestamp; value)")
             (@arg batch_size: -b <BATCH> --batch default_value("100") "batch size")
+            (@arg compression: -i <COMPRESSION> --compression default_value("delta") possible_value[none deflate delta] "compression")
         )
         (@subcommand export =>
             (about: "export entries from the series")
@@ -35,11 +35,6 @@ async fn main() {
     let mut db = DB::open(
         matches.value_of("path").unwrap(),
         SyncMode::Every(100),
-        match matches.value_of("compression").unwrap() {
-            "deflate" => Compression::Deflate,
-            "delta" => Compression::Delta,
-            _ => Compression::None,
-        },
     )
     .unwrap();
 
@@ -49,6 +44,11 @@ async fn main() {
             sub_match.value_of("series").unwrap(),
             sub_match.value_of("csv").unwrap(),
             sub_match.value_of("batch_size").and_then(|from| from.parse::<usize>().ok()).unwrap(),
+            match sub_match.value_of("compression").unwrap() {
+                "deflate" => Compression::Deflate,
+                "delta" => Compression::Delta,
+                _ => Compression::None,
+            },
         )
         .unwrap(),
         ("export", Some(sub_match)) => {
