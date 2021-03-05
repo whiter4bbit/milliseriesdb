@@ -1,4 +1,5 @@
 use super::io_utils::{self, checksum_u64, ReadBytes, ReadError, ReadResult, WriteBytes};
+use super::Change;
 use std::collections::VecDeque;
 use std::fs::{read_dir, remove_file, File};
 use std::io::prelude::*;
@@ -91,6 +92,7 @@ pub fn read_last_log_entry<P: AsRef<Path>>(path: P) -> io::Result<Option<LogEntr
 
 pub struct LogWriter {
     file: File,
+    file_path: PathBuf,
     sequence: u64,
     path: PathBuf,
     max_size: u64,
@@ -117,6 +119,7 @@ impl LogWriter {
 
         let mut writer = LogWriter {
             file: io_utils::open_writable(current_log_path.clone())?,
+            file_path: current_log_path.clone(),
             sequence: sequence,
             path: path.as_ref().to_path_buf(),
             max_size: max_size,
@@ -148,6 +151,7 @@ impl LogWriter {
         let next_log_path = self.path.clone().join(&log_filename(next_sequence));
 
         self.file = io_utils::open_writable(next_log_path.clone())?;
+        self.file_path = next_log_path.clone();
 
         self.sequence = next_sequence;
         self.current_size = 0;
@@ -156,13 +160,18 @@ impl LogWriter {
 
         self.cleanup()
     }
-    pub fn append(&mut self, entry: &LogEntry) -> io::Result<()> {
+    pub fn append(&mut self, entry: &LogEntry) -> io::Result<Change> {
         self.rotate_if_needed()?;
 
         entry.write_entry(&mut self.file)?;
 
         self.current_size += LOG_ENTRY_SIZE;
-        Ok(())
+        
+        Ok(Change {
+            offset: self.current_size - LOG_ENTRY_SIZE,
+            size: LOG_ENTRY_SIZE,
+            path: self.file_path.clone(),
+        })
     }
     pub fn sync(&mut self) -> io::Result<()> {
         self.file.sync_data()

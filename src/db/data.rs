@@ -1,8 +1,9 @@
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, BufReader, Cursor, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use super::Change;
 use super::compression::Compression;
 use super::entry::Entry;
 use super::io_utils::{self, ReadBytes, WriteBytes};
@@ -39,22 +40,26 @@ impl BlockHeader {
 
 pub struct DataWriter {
     file: File,
+    file_path: PathBuf,
     offset: u64,
     buffer: Cursor<Vec<u8>>,
 }
 
 impl DataWriter {
     pub fn create<P: AsRef<Path>>(path: P, offset: u64) -> io::Result<DataWriter> {
-        let mut file = io_utils::open_writable(path.as_ref().join("series.dat"))?;
+        let file_path = path.as_ref().join("series.dat");
+
+        let mut file = io_utils::open_writable(file_path.clone())?;
         file.seek(SeekFrom::Start(offset))?;
 
         Ok(DataWriter {
             file: file,
+            file_path: file_path.clone(),
             offset: offset,
             buffer: Cursor::new(Vec::new()),
         })
     }
-    pub fn append(&mut self, block: &[&Entry], compression: Compression) -> io::Result<u64> {
+    pub fn append(&mut self, block: &[&Entry], compression: Compression) -> io::Result<Change> {
         self.buffer.set_position(0);
         compression.write(block, &mut self.buffer)?;
 
@@ -68,8 +73,15 @@ impl DataWriter {
         .write(&mut self.file)?;
         self.file.write_all(&self.buffer.get_ref()[0..block_size as usize])?;
 
+        let change = Change {
+            offset: self.offset,
+            size: block_size + BLOCK_HEADER_SIZE,
+            path: self.file_path.clone(),
+        };
+
         self.offset += block_size + BLOCK_HEADER_SIZE;
-        Ok(self.offset)
+        
+        Ok(change)
     }
     pub fn sync(&mut self) -> io::Result<()> {
         self.file.sync_data()

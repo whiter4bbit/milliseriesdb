@@ -14,12 +14,24 @@ mod test_utils;
 pub use compression::Compression;
 pub use entry::Entry;
 pub use executor::{Aggregation, Executor, Query, QueryExpr, Row};
-pub use series::{Series, SyncMode};
+pub use series::{Series, SyncMode, SeriesWriterGuard};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, read_dir};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+pub struct Change {
+    offset: u64,
+    size: u64,
+    path: PathBuf,
+}
+
+pub struct Changes {
+    data: Change,
+    index: Change,
+    log: Change,
+}
 
 fn get_series_paths(base_path: &PathBuf) -> io::Result<Vec<(String, PathBuf)>> {
     let mut series = Vec::new();

@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use super::Changes;
 use super::data::{DataReader, DataWriter};
 use super::entry::Entry;
 use super::index::{IndexReader, IndexWriter};
@@ -69,24 +70,39 @@ impl SeriesWriter {
         Ok(())
     }
     #[allow(dead_code)]
-    pub fn append_batch(&mut self, batch: &[Entry], compression: Compression) -> io::Result<()> {
+    pub fn append_batch(&mut self, batch: &[Entry], compression: Compression) -> io::Result<Option<Changes>> {
         let mut ordered: Vec<&Entry> = batch.iter().filter(|entry| entry.ts >= self.last_log_entry.highest_ts).collect();
         ordered.sort_by_key(|entry| entry.ts);
+        
         if ordered.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
-        let index_offset = self
-            .index_writer
-            .append(ordered.last().unwrap().ts, self.last_log_entry.data_offset)?;
-        let data_offset = self.data_writer.append(&ordered, compression)?;
+
+        let highest_ts = ordered.last().unwrap().ts;
+
+        let data_block_offset = self.last_log_entry.data_offset;
+
+        let index_change = self.index_writer.append(highest_ts, data_block_offset)?;
+
+        let data_change = self.data_writer.append(&ordered, compression)?;
+
         let last_log_entry = LogEntry {
-            data_offset: data_offset,
-            index_offset: index_offset,
-            highest_ts: ordered.last().unwrap().ts,
+            data_offset: data_change.offset + data_change.size,
+            index_offset: index_change.offset + index_change.size,
+            highest_ts: highest_ts,
         };
-        self.log_writer.append(&last_log_entry)?;
+
+        let log_change = self.log_writer.append(&last_log_entry)?;
+
         self.last_log_entry = last_log_entry;
-        self.fsync()
+        
+        self.fsync()?;
+
+        Ok(Some(Changes {
+            data: data_change,
+            index: index_change,
+            log: log_change,
+        }))
     }
 }
 
@@ -176,7 +192,12 @@ pub struct SeriesWriterGuard {
 }
 
 impl SeriesWriterGuard {
-    pub fn append(&mut self, batch: &[Entry], compression: Compression) -> io::Result<()> {
+    pub fn create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<SeriesWriterGuard> {
+        Ok(SeriesWriterGuard {
+            writer: Arc::new(Mutex::new(SeriesWriter::create(path, sync_mode)?)),
+        })
+    }
+    pub fn append(&mut self, batch: &[Entry], compression: Compression) -> io::Result<Option<Changes>> {
         let mut writer = self.writer.lock().unwrap();
         writer.append_batch(batch, compression)
     }

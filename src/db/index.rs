@@ -1,8 +1,8 @@
-use super::io_utils;
+use super::{io_utils, Change};
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 const INDEX_ENTRY_LENGTH: u64 = 16u64;
@@ -10,22 +10,29 @@ const INDEX_ENTRY_LENGTH: u64 = 16u64;
 pub struct IndexWriter {
     offset: u64,
     file: File,
+    file_path: PathBuf,
 }
 
 impl IndexWriter {
     pub fn open<P: AsRef<Path>>(path: P, offset: u64) -> io::Result<IndexWriter> {
-        let mut file = io_utils::open_writable(path.as_ref().join("series.idx"))?;
+        let file_path = path.as_ref().join("series.idx");
+        let mut file = io_utils::open_writable(file_path.clone())?;
         file.seek(SeekFrom::Start(offset))?;
         Ok(IndexWriter {
             offset: offset,
             file: file,
+            file_path: file_path.clone(),
         })
     }
-    pub fn append(&mut self, ts: u64, offset: u64) -> io::Result<u64> {
+    pub fn append(&mut self, ts: u64, offset: u64) -> io::Result<Change> {
         self.file.write_all(&ts.to_be_bytes())?;
         self.file.write_all(&offset.to_be_bytes())?;
         self.offset += INDEX_ENTRY_LENGTH;
-        Ok(self.offset)
+        Ok(Change {
+            offset: self.offset - INDEX_ENTRY_LENGTH,
+            size: INDEX_ENTRY_LENGTH,
+            path:  self.file_path.clone(),
+        })
     }
     pub fn sync(&mut self) -> io::Result<()> {
         self.file.sync_data()
@@ -104,7 +111,9 @@ mod test {
             let mut writer = IndexWriter::open(&db_dir.path, 0).unwrap();
             writer.append(1, 11).unwrap();
             writer.append(4, 44).unwrap();
-            writer.append(9, 99).unwrap()
+            let change =  writer.append(9, 99).unwrap();
+            
+            change.offset + change.size
         };
 
         {
