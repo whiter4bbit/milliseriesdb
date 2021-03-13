@@ -4,7 +4,7 @@ mod entry;
 mod executor;
 mod index;
 mod io_utils;
-mod log;
+pub mod log;
 mod series;
 mod utils;
 
@@ -21,7 +21,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-fn get_series_paths(base_path: &PathBuf) -> io::Result<Vec<(String, PathBuf)>> {
+pub fn get_series_paths(base_path: &PathBuf) -> io::Result<Vec<(String, PathBuf)>> {
     let mut series = Vec::new();
     for entry in read_dir(base_path.join("series"))? {
         let series_path = entry?.path().clone();

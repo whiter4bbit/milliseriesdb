@@ -41,7 +41,7 @@ impl LogEntry {
     }
 }
 
-fn log_filename(sequence: u64) -> String {
+pub fn log_filename(sequence: u64) -> String {
     return format!("series.log.{}", sequence);
 }
 
