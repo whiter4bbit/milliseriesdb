@@ -94,7 +94,7 @@ impl<'a> Into<io::Error> for StrError<'a> {
         io::Error::new(io::ErrorKind::Other, self.0)
     }
 }
-
+    
 struct ReplicatedSeries {
     path: PathBuf,
     data: ReplicatedFile,
@@ -163,7 +163,7 @@ impl ReplicatedSeries {
         }
 
         self.data.replicate(proto, log_entry.data_offset).await?;
-        self.index.replicate(proto, log_entry.data_offset).await?;
+        self.index.replicate(proto, log_entry.index_offset).await?;
         self.log.replicate(proto, log_entry.data_offset).await
     }
 }
