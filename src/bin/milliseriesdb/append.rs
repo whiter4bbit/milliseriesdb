@@ -27,8 +27,8 @@ pub fn append(db: &mut DB, series_id: &str, input_csv: &str, batch_size: usize, 
         Box::new(BufReader::new(File::open(input_csv)?))
     };
 
-    let series = db.create_series(series_id)?;
-    let mut writer = series.writer();
+    db.create_series(series_id)?;
+    let writer = db.writer(series_id).unwrap();
     let mut buffer = Vec::new();
     for entry in reader.lines() {
         let CsvEntry(ts, val) = entry?.parse::<CsvEntry>()?;

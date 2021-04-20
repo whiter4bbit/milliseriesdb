@@ -128,16 +128,14 @@ mod test {
         assert_eq!(
             true,
             match result[0].values[0] {
-                Aggregation::Mean(value) => (value - 3.0).abs() <= 10e-6,
-                _ => false,
+                Aggregation::Mean(value) => (value - 3.0).abs() <= 10e-6
             }
         );
 
         assert_eq!(
             true,
             match result[1].values[0] {
-                Aggregation::Mean(value) => (value - 5.0).abs() <= 10e-6,
-                _ => false,
+                Aggregation::Mean(value) => (value - 5.0).abs() <= 10e-6
             }
         )
     }
