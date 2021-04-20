@@ -91,6 +91,22 @@ impl DataReader {
         })
     }
 
+    pub fn seek(&mut self, offset: u64) -> io::Result<()> {
+        self.file.seek(SeekFrom::Start(offset))?;
+        Ok(())
+    }
+
+    pub fn read_raw_block(&mut self) -> io::Result<Vec<u8>> {
+        let header = BlockHeader::read(&mut self.file)?;
+        self.file.seek(SeekFrom::Current(-(BLOCK_HEADER_SIZE as i64)))?;
+
+        let mut block = vec![0u8; BLOCK_HEADER_SIZE as usize + header.payload_size];        
+        self.file.read_exact(&mut block)?;
+        
+        self.offset += header.payload_size as u64 + BLOCK_HEADER_SIZE;
+        Ok(block)
+    }
+
     pub fn read_block<D: Extend<Entry>>(&mut self, destination: &mut D) -> io::Result<u64> {
         let header = BlockHeader::read(&mut self.file)?;
         let mut payload = self.file.by_ref().take(header.payload_size as u64);
@@ -117,8 +133,12 @@ mod test {
         ];
 
         let mut writer = DataWriter::create(&db_dir.path, 0).unwrap();
-        writer.append(&entries[0..3].iter().collect::<Vec<&Entry>>(), Compression::Deflate).unwrap();
-        writer.append(&entries[3..5].iter().collect::<Vec<&Entry>>(), Compression::Deflate).unwrap();
+        writer
+            .append(&entries[0..3].iter().collect::<Vec<&Entry>>(), Compression::Deflate)
+            .unwrap();
+        writer
+            .append(&entries[3..5].iter().collect::<Vec<&Entry>>(), Compression::Deflate)
+            .unwrap();
 
         {
             let mut reader = DataReader::create(&db_dir.path, 0).unwrap();

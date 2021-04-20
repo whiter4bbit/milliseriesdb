@@ -47,6 +47,14 @@ impl IndexReader {
         })
     }
 
+    pub fn read_raw_at(&mut self, offset: u64) -> io::Result<Vec<u8>> {
+        self.file.seek(SeekFrom::Start(offset))?;
+
+        let mut entry = vec![0u8; INDEX_ENTRY_LENGTH as usize];
+        self.file.read_exact(&mut entry)?;
+        Ok(entry)
+    }
+
     fn read_higher_ts(&mut self, entry_index: u64) -> io::Result<u64> {
         self.file.seek(SeekFrom::Start(entry_index * INDEX_ENTRY_LENGTH))?;
         self.file.read_exact(&mut self.buf)?;

@@ -5,7 +5,7 @@ use std::io::prelude::*;
 use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct LogEntry {
     pub data_offset: u64,
     pub index_offset: u64,
