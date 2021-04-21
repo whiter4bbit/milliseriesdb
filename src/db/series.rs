@@ -187,6 +187,15 @@ impl SeriesWriterGuard {
         let mut writer = self.writer.lock().unwrap();
         writer.append_batch(batch, compression)
     }
+
+    pub async fn append_async(&self, batch: Vec<Entry>, compression: Compression) -> io::Result<()> {
+        let writer = self.writer.clone();
+        
+        tokio::task::spawn_blocking(move || {
+            let mut writer = writer.lock().unwrap();
+            writer.append_batch(&batch, compression)
+        }).await.unwrap()
+    }
 }
 
 impl IntoEntriesIterator for Arc<SeriesReader> {

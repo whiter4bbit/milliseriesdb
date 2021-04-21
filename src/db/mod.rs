@@ -72,7 +72,7 @@ impl DB {
         readers.get(name.as_ref()).map(|s| s.clone())
     }
 
-    pub fn create_series<N: AsRef<str>>(&mut self, name: N) -> io::Result<()> {
+    pub fn create_series<N: AsRef<str>>(&self, name: N) -> io::Result<()> {
         let mut writers = self.writers.lock().unwrap();
         let mut readers = self.readers.lock().unwrap();
 
@@ -90,6 +90,35 @@ impl DB {
                 Ok(())
             }
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct AsyncDB {
+    db: Arc<DB>,
+}
+
+impl AsyncDB {
+    pub fn create(db: DB) -> AsyncDB {
+        AsyncDB {
+            db: Arc::new(db),
+        }
+    }
+
+    pub fn writer<N: AsRef<str>>(&self, name: N) -> Option<Arc<SeriesWriterGuard>> {
+        self.db.writer(name)
+    }
+
+    pub fn reader<N: AsRef<str>>(&self, name: N) -> Option<Arc<SeriesReader>> {
+        self.db.reader(name)
+    }
+
+    pub async fn create_series(&self, name: String) -> io::Result<()> {
+        let db = self.db.clone();
+
+        tokio::task::spawn_blocking(move || {
+            db.create_series(name)
+        }).await.unwrap()
     }
 }
 
