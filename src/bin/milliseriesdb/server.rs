@@ -1,4 +1,4 @@
-use milliseriesdb::db::{Aggregation, Entry, Executor, Query, QueryExpr, Row, DB, AsyncDB, Compression};
+use milliseriesdb::db::{Aggregation, Entry, execute_query_async, Query, QueryExpr, Row, DB, AsyncDB, Compression};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::{Infallible, TryFrom};
 use std::io;
@@ -49,13 +49,13 @@ pub struct JsonRow {
 
 mod handlers {
     use super::*;
-    pub async fn create_handler(id: String, db: AsyncDB) -> Result<impl warp::Reply, Infallible> {
+    pub async fn create(id: String, db: AsyncDB) -> Result<impl warp::Reply, Infallible> {
         Ok(match db.clone().create_series(id).await {
             Ok(()) => StatusCode::CREATED,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         })
     }
-    pub async fn append_handler(id: String, entries: JsonEntries, db: AsyncDB) -> Result<impl warp::Reply, Infallible> {
+    pub async fn append(id: String, entries: JsonEntries, db: AsyncDB) -> Result<impl warp::Reply, Infallible> {
         Ok(match db.writer(id) {
             Some(writer) => match writer.append_async(entries.entries, Compression::Delta).await {
                 Ok(()) => StatusCode::OK,
@@ -64,23 +64,16 @@ mod handlers {
             _ => StatusCode::NOT_FOUND
         })
     }
-    pub async fn query_handler(id: String, query_expr: QueryExpr, db: AsyncDB) -> Result<Box<dyn warp::Reply>, Infallible> {
-        fn query_internal(id: String, query: Query, db: AsyncDB) -> io::Result<Option<Vec<Row>>> {
-            match db.clone().reader(id) {
-                Some(reader) => Ok(Some(Executor::new(&query).execute(reader)?)),
-                None => Ok(None),
-            }
-        }
-        Ok(match Query::try_from(query_expr) {
-            Ok(query) => {
-                let result = tokio::task::spawn_blocking(move || query_internal(id, query, db));
-                match result.await {
-                    Ok(Ok(None)) => Box::new(StatusCode::NOT_FOUND),
-                    Ok(Ok(Some(rows))) => Box::new(warp::reply::json(&JsonRows::from_rows(rows))),
+    pub async fn query(id: String, query_expr: QueryExpr, db: AsyncDB) -> Result<Box<dyn warp::Reply>, Infallible> {
+        Ok(match db.reader(id) {
+            Some(reader) => match Query::try_from(query_expr) {
+                Ok(query) => match execute_query_async(query, reader).await {
+                    Ok(rows) => Box::new(warp::reply::json(&JsonRows::from_rows(rows))),
                     _ => Box::new(StatusCode::INTERNAL_SERVER_ERROR),
-                }
-            }
-            _ => Box::new(StatusCode::BAD_REQUEST),
+                },
+                _ => Box::new(StatusCode::BAD_REQUEST),
+            },
+            _ => Box::new(StatusCode::NOT_FOUND),
         })
     }
 }
@@ -91,19 +84,19 @@ pub async fn start_server(db: DB, addr: SocketAddr) -> io::Result<()> {
     let create_series = warp::path!("series" / String)
         .and(warp::put())
         .and(db.with_db())
-        .and_then(handlers::create_handler);
+        .and_then(handlers::create);
 
     let append_to_series = warp::path!("series" / String)
         .and(warp::post())
         .and(warp::body::json())
         .and(db.with_db())
-        .and_then(handlers::append_handler);
+        .and_then(handlers::append);
 
     let query_series = warp::path!("series" / String)
         .and(warp::get())
         .and(warp::query::<QueryExpr>())
         .and(db.with_db())
-        .and_then(handlers::query_handler);
+        .and_then(handlers::query);
 
     let server_api = create_series.or(append_to_series).or(query_series);
 
