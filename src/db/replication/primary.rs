@@ -1,6 +1,6 @@
 use super::super::data::DataReader;
-use super::super::index::IndexReader;
 use super::super::get_series_paths;
+use super::super::index::IndexReader;
 use super::super::log::{read_last_log_entry, LogEntry};
 use super::block_batch::BlockBatch;
 
@@ -35,7 +35,7 @@ impl Session {
         reader.read_block(&mut block_entries)?;
 
         if block_entries.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::Other, "Block is empty"))
+            return Err(io::Error::new(io::ErrorKind::Other, "Block is empty"));
         }
 
         Ok((raw_block, block_entries[block_entries.len() - 1].ts))
@@ -48,8 +48,6 @@ impl Session {
     }
 
     fn create_block_batch(&self, name: &str, from: &LogEntry, until: &LogEntry) -> io::Result<BlockBatch> {
-        let series_path = self.base_path.join(name);
-
         let (data_block, highest_ts) = self.read_data_block(name, from.data_offset)?;
         let next_data_offset = from.data_offset + data_block.len() as u64;
 
@@ -68,7 +66,8 @@ impl Session {
             },
         })
     }
-
+    
+    #[allow(dead_code)]
     pub fn next_batch(&mut self) -> io::Result<Option<BlockBatch>> {
         self.refresh_primary_state()?;
 
@@ -90,13 +89,17 @@ impl Session {
 
         Ok(None)
     }
-    
+    #[allow(dead_code)]
     pub fn acknowledge(&mut self, name: &str, log_entry: LogEntry) -> io::Result<()> {
-        let current = self.replica.entry(name.to_owned()).or_insert(LogEntry {
-            data_offset: 0,
-            index_offset: 0,
-            highest_ts: 0
-        }).clone();
+        let current = self
+            .replica
+            .entry(name.to_owned())
+            .or_insert(LogEntry {
+                data_offset: 0,
+                index_offset: 0,
+                highest_ts: 0,
+            })
+            .clone();
 
         if current.data_offset < log_entry.data_offset {
             self.replica.insert(name.to_owned(), log_entry.clone());
@@ -111,17 +114,31 @@ pub struct Primary {
 }
 
 impl Primary {
+    #[allow(dead_code)]
     pub fn create<P: AsRef<Path>>(base_path: P) -> io::Result<Primary> {
         Ok(Primary {
             base_path: base_path.as_ref().to_path_buf(),
         })
     }
 
+    #[allow(dead_code)]
     pub fn handshake(&self, replica: HashMap<String, LogEntry>) -> io::Result<Session> {
         Ok(Session {
             base_path: self.base_path.clone(),
             primary: HashMap::new(),
             replica: replica,
         })
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+    use super::super::super::test_utils::create_temp_dir;
+    use super::*;
+
+    #[test]
+    fn test_replica() {
+        
     }
 }
