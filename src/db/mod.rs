@@ -48,7 +48,7 @@ impl DB {
     pub fn open<P: AsRef<Path>>(base_path: P, sync_mode: SyncMode) -> io::Result<DB> {
         let dir_with_series = base_path.as_ref().join("series");
         create_dir_all(dir_with_series.clone())?;
-
+        
         let mut writers = HashMap::new();
         let mut readers = HashMap::new();
         for (name, series_dir) in get_series_paths(&base_path.as_ref().to_path_buf())? {

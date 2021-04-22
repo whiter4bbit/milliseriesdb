@@ -21,11 +21,12 @@ impl Session {
                 self.primary.insert(name.clone(), last_log_entry);
             }
         }
+
         Ok(())
     }
 
     fn read_data_block(&self, name: &str, offset: u64) -> io::Result<(Vec<u8>, u64)> {
-        let mut reader = DataReader::create(self.base_path.join(name), offset)?;
+        let mut reader = DataReader::create(self.base_path.join("series").join(name), offset)?;
 
         let raw_block = reader.read_raw_block()?;
 
@@ -42,7 +43,7 @@ impl Session {
     }
 
     fn read_index_block(&self, name: &str, offset: u64) -> io::Result<Vec<u8>> {
-        let mut reader = IndexReader::create(self.base_path.join(name), offset)?;
+        let mut reader = IndexReader::create(self.base_path.join("series").join(name), offset)?;
 
         reader.read_raw_at(offset)
     }
@@ -66,7 +67,6 @@ impl Session {
             },
         })
     }
-    
     #[allow(dead_code)]
     pub fn next_batch(&mut self) -> io::Result<Option<BlockBatch>> {
         self.refresh_primary_state()?;
@@ -90,7 +90,7 @@ impl Session {
         Ok(None)
     }
     #[allow(dead_code)]
-    pub fn acknowledge(&mut self, name: &str, log_entry: LogEntry) -> io::Result<()> {
+    pub fn acknowledge(&mut self, name: &str, log_entry: &LogEntry) -> io::Result<()> {
         let current = self
             .replica
             .entry(name.to_owned())
@@ -131,14 +131,51 @@ impl Primary {
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use super::super::super::test_utils::create_temp_dir;
+    use super::super::super::{Compression, Entry, SyncMode, DB};
     use super::*;
 
     #[test]
     fn test_replica() {
-        
+        let db_dir = create_temp_dir("test-base").unwrap();
+
+        let mut db = DB::open(&db_dir.path, SyncMode::Paranoid).unwrap();
+        let mut primary = Primary::create(&db_dir.path).unwrap();
+
+        let mut session1 = primary.handshake(HashMap::new()).unwrap();
+
+        assert!(session1.next_batch().unwrap().is_none());
+
+        db.create_series("series1").unwrap();
+
+        assert!(session1.next_batch().unwrap().is_none());
+
+        db.writer("series1")
+            .unwrap()
+            .append(&vec![Entry { ts: 1, value: 1.0 }], Compression::Delta)
+            .unwrap();
+
+        assert!(session1.next_batch().unwrap().is_some());
+
+        let first_batch = session1.next_batch().unwrap().unwrap();
+
+        session1.acknowledge("series1", &first_batch.after).unwrap();
+
+        assert!(session1.next_batch().unwrap().is_none());
+
+        db.writer("series1")
+            .unwrap()
+            .append(&vec![Entry { ts: 2, value: 2.0 }], Compression::Delta)
+            .unwrap();        
+
+        assert!(session1.next_batch().unwrap().is_some());
+
+        let second_batch = session1.next_batch().unwrap().unwrap();
+
+        assert_eq!(second_batch.before, first_batch.after);
+
+        assert_eq!(second_batch.after.highest_ts, 2);
     }
 }
