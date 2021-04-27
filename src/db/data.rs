@@ -80,7 +80,6 @@ impl DataWriter {
 
 pub struct DataReader {
     file: BufReader<File>,
-    buffer: Vec<u8>,
     offset: u64,
 }
 
@@ -90,18 +89,14 @@ impl DataReader {
         file.seek(SeekFrom::Start(start_offset))?;
         Ok(DataReader {
             file: BufReader::with_capacity(2 * 1024 * 1024, file),
-            buffer: vec![0u8; 1024 * 1024],
             offset: start_offset,
         })
     }
+
     pub fn read_block<D: Extend<Entry>>(&mut self, destination: &mut D) -> io::Result<u64> {
         let header = BlockHeader::read(&mut self.file)?;
-        while self.buffer.len() < header.payload_size {
-            self.buffer.push(0u8);
-        }
-        self.file.read_exact(&mut self.buffer[0..header.payload_size])?;
-        let mut reader = Cursor::new(&self.buffer);
-        destination.extend(header.compression.read(&mut reader, header.entries_count)?);
+        let mut payload = self.file.by_ref().take(header.payload_size as u64);
+        destination.extend(header.compression.read(&mut payload, header.entries_count)?);
         self.offset += header.payload_size as u64 + BLOCK_HEADER_SIZE;
         Ok(self.offset)
     }
@@ -123,9 +118,9 @@ mod test {
             Entry { ts: 5, value: 51.0 },
         ];
 
-        let mut writer = DataWriter::create(&db_dir.path, 0, Compression::None).unwrap();
+        let mut writer = DataWriter::create(&db_dir.path, 0, Compression::Deflate).unwrap();
         writer.append(&entries[0..3].iter().collect::<Vec<&Entry>>()).unwrap();
-        let offset_block2 = writer.append(&entries[3..5].iter().collect::<Vec<&Entry>>()).unwrap();
+        writer.append(&entries[3..5].iter().collect::<Vec<&Entry>>()).unwrap();
 
         {
             let mut reader = DataReader::create(&db_dir.path, 0).unwrap();

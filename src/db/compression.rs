@@ -3,8 +3,8 @@ use super::Entry;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use flate2::Compression as DeflateCompression;
+use integer_encoding::{VarIntReader, VarIntWriter};
 use std::io::{self, Read, Write};
-use integer_encoding::{VarIntWriter, VarIntReader};
 
 #[derive(Clone)]
 pub enum Compression {
@@ -69,7 +69,7 @@ fn read_delta<R: Read>(from: &mut R, size: usize) -> io::Result<Vec<Entry>> {
 
     entries.push(Entry {
         ts: last_ts,
-        value: last_val
+        value: last_val,
     });
 
     for _ in 1..size {
@@ -117,5 +117,42 @@ impl Compression {
             Compression::Deflate => read_deflate(from, size),
             Compression::Delta => read_delta(from, size),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::io::Cursor;
+
+    fn check(compression: Compression, entries: &[&Entry]) -> io::Result<()> {
+        let mut cursor = Cursor::new(Vec::new());
+        compression.write(entries, &mut cursor)?;
+        cursor.set_position(0);
+        assert_eq!(
+            entries.into_iter().cloned().cloned().collect::<Vec<Entry>>(),
+            compression.read(&mut cursor, entries.len())?
+        );
+        Ok(())
+    }
+    
+    #[test]
+    fn test_delta() {
+        check(Compression::Delta, &[&Entry { ts: 1, value: 10.0 }]).unwrap();
+        check(Compression::Delta, &[&Entry { ts: 1, value: 10.0 }, &Entry { ts: 2, value: 20.0 }]).unwrap();
+        check(
+            Compression::Delta,
+            &[
+                &Entry { ts: 1, value: 10.0 },
+                &Entry { ts: 2, value: 20.0 },
+                &Entry { ts: 10, value: 30.0 },
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_deflate() {
+        check(Compression::Deflate, &[&Entry { ts: 1, value: 10.0 }, &Entry { ts: 2, value: 20.0 }]).unwrap();
     }
 }
