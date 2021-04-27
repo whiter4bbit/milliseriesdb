@@ -25,7 +25,7 @@ pub trait QueryBuilder {
     {
         Query {
             into_iterator: self,
-            statement: statement,
+            statement,
         }
     }
 }

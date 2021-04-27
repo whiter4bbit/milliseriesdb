@@ -28,9 +28,9 @@ impl BlockHeader {
         };
         let payload_size = file.read_u32()? as usize;
         Ok(BlockHeader {
-            entries_count: entries_count,
-            compression: compression,
-            payload_size: payload_size,
+            entries_count,
+            compression,
+            payload_size,
         })
     }
     fn write(&self, file: &mut File) -> io::Result<()> {
@@ -50,8 +50,8 @@ pub struct DataWriter {
 impl DataWriter {
     pub fn create(file: File, offset: u64) -> io::Result<DataWriter> {
         let mut writer = DataWriter {
-            file: file,
-            offset: offset,
+            file,
+            offset,
             buffer: Cursor::new(Vec::new()),
         };
 
@@ -68,7 +68,7 @@ impl DataWriter {
 
         BlockHeader {
             entries_count: block.len(),
-            compression: compression.clone(),
+            compression,
             payload_size: block_size as usize,
         }
         .write(&mut self.file)?;

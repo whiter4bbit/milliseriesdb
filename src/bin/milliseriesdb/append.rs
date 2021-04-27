@@ -38,14 +38,14 @@ pub fn append(
     let mut buffer = Vec::new();
     for entry in reader.lines() {
         let CsvEntry(ts, val) = entry?.parse::<CsvEntry>()?;
-        buffer.push(Entry { ts: ts, value: val });
+        buffer.push(Entry { ts, value: val });
         if buffer.len() == batch_size {
             writer.append(&buffer, compression.clone())?;
             buffer.clear();
         }
     }
     if !buffer.is_empty() {
-        writer.append(&buffer, compression.clone())?;
+        writer.append(&buffer, compression)?;
     }
     Ok(())
 }

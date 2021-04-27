@@ -13,8 +13,8 @@ pub struct IndexWriter {
 impl IndexWriter {
     pub fn open(file: File, offset: u64) -> io::Result<IndexWriter> {
         let mut writer = IndexWriter {
-            offset: offset,
-            file: file,
+            offset,
+            file,
         };
         writer.file.seek(SeekFrom::Start(offset))?;
         Ok(writer)
@@ -39,7 +39,7 @@ pub struct IndexReader {
 impl IndexReader {
     pub fn create(file: File, offset: u64) -> io::Result<IndexReader> {
         Ok(IndexReader {
-            file: file,
+            file,
             entries: offset / INDEX_ENTRY_LENGTH,
             buf: [0u8; 8],
         })

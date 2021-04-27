@@ -49,9 +49,9 @@ impl SeriesWriter {
                 dir.open(FileKind::Index, OpenMode::Write)?,
                 last_entry.index_offset,
             )?,
-            log_writer: log_writer,
+            log_writer,
             last_log_entry: last_entry,
-            sync_mode: sync_mode,
+            sync_mode,
             writes: 0,
         })
     }
@@ -84,8 +84,8 @@ impl SeriesWriter {
             .append(ordered.last().unwrap().ts, self.last_log_entry.data_offset)?;
         let data_offset = self.data_writer.append(&ordered, compression)?;
         let last_log_entry = LogEntry {
-            data_offset: data_offset,
-            index_offset: index_offset,
+            data_offset,
+            index_offset,
             highest_ts: ordered.last().unwrap().ts,
         };
         self.log_writer.append(&last_log_entry)?;
@@ -104,7 +104,7 @@ impl SeriesReader {
     pub fn create(dir: Arc<SeriesDir>) -> io::Result<SeriesReader> {
         Ok(SeriesReader {
             dir: dir.clone(),
-            log_reader: LogReader::create(dir.clone()),
+            log_reader: LogReader::create(dir),
         })
     }
 
@@ -129,7 +129,7 @@ impl SeriesReader {
             )?,
             offset: start_offset,
             size: last_log_entry.data_offset,
-            from_ts: from_ts,
+            from_ts,
             buffer: VecDeque::new(),
         })
     }

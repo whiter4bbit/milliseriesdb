@@ -12,7 +12,7 @@ pub fn export(
     let mut writer = BufWriter::new(File::create(output_csv)?);
     for entry in reader.iterator(from_ts)? {
         let entry = entry?;
-        writer.write(format!("{}; {:.2}\n", entry.ts, entry.value).as_bytes())?;
+        writer.write_all(format!("{}; {:.2}\n", entry.ts, entry.value).as_bytes())?;
     }
     Ok(())
 }

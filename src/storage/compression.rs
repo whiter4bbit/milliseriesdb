@@ -73,7 +73,7 @@ fn read_delta<R: Read>(from: &mut R, size: usize) -> io::Result<Vec<Entry>> {
     });
 
     for _ in 1..size {
-        last_ts = last_ts + from.read_varint::<u64>()?;
+        last_ts += from.read_varint::<u64>()?;
         last_val = f64::from_bits(last_val.to_bits() ^ from.read_varint::<u64>()?);
 
         entries.push(Entry {

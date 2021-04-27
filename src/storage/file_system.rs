@@ -47,7 +47,7 @@ impl SeriesDir {
     }
     fn parse_log_filename(&self, s: &str) -> Option<u64> {
         s.strip_prefix("series.log.")
-            .and_then(|suffix| suffix.parse::<u64>().ok().map(|seq| seq))
+            .and_then(|suffix| suffix.parse::<u64>().ok())
     }
     pub fn read_log_sequences(&self) -> io::Result<Vec<u64>> {
         let mut sequences = fs::read_dir(&self.base_path)?
@@ -55,7 +55,7 @@ impl SeriesDir {
             .filter_map(|entry| entry.file_name().into_string().ok())
             .filter_map(|entry| self.parse_log_filename(&entry))
             .collect::<Vec<u64>>();
-        sequences.sort();
+        sequences.sort_unstable();
         sequences.reverse();
         Ok(sequences)
     }
@@ -74,7 +74,7 @@ impl FileSystem {
         fs::create_dir_all(&base_path)?;
 
         Ok(Arc::new(SeriesDir {
-            base_path: base_path,
+            base_path,
         }))
     }
 

@@ -111,5 +111,7 @@ pub async fn start_server(series_table: Arc<SeriesTable>, addr: SocketAddr) -> i
 
     let server_api = create_series.or(append_to_series).or(query_series);
 
-    Ok(warp::serve(server_api).run(addr).await)
+    warp::serve(server_api).run(addr).await;
+    
+    Ok(())
 }

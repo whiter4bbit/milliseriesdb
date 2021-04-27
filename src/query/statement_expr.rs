@@ -32,7 +32,7 @@ impl FromStr for FromTimestamp {
     fn from_str(s: &str) -> Result<FromTimestamp, Self::Err> {
         parse_date_time(s, "%F %H:%M", "00:00")
             .or_else(|_| parse_millis(s))
-            .map(|millis| FromTimestamp(millis))
+            .map(FromTimestamp)
     }
 }
 
@@ -82,10 +82,10 @@ impl TryFrom<StatementExpr> for Statement {
         let limit = source.limit.parse::<usize>().map_err(|_| ())?;
 
         Ok(Statement {
-            from: from,
-            group_by: group_by,
-            aggregators: aggregators,
-            limit: limit,
+            from,
+            group_by,
+            aggregators,
+            limit,
         })
     }
 }

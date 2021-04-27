@@ -14,7 +14,7 @@ pub struct VecIterator {
 impl Iterator for VecIterator {
     type Item = io::Result<Entry>;
     fn next(&mut self) -> Option<Self::Item> {
-        self.deque.pop_front().map(|entry| Ok(entry))
+        self.deque.pop_front().map(Ok)
     }
 }
 

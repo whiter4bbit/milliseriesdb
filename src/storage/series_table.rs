@@ -63,8 +63,8 @@ pub fn create(fs: FileSystem, sync_mode: SyncMode) -> io::Result<SeriesTable> {
     }
 
     Ok(SeriesTable {
-        fs: fs,
-        sync_mode: sync_mode,
+        fs,
+        sync_mode,
         entries: Arc::new(Mutex::new(entries)),
     })
 }

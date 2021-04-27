@@ -24,17 +24,17 @@ const ZERO_ENTRY: LogEntry = LogEntry {
 
 impl LogEntry {
     fn read_entry<R: Read>(read: &mut R) -> ReadResult<LogEntry> {
-        let data_offset = read.read_u64().map_err(|e| ReadError::Other(e))?;
-        let index_offset = read.read_u64().map_err(|e| ReadError::Other(e))?;
-        let highest_ts = read.read_u64().map_err(|e| ReadError::Other(e))?;
-        let target_checksum = read.read_u64().map_err(|e| ReadError::Other(e))?;
+        let data_offset = read.read_u64().map_err(ReadError::Other)?;
+        let index_offset = read.read_u64().map_err(ReadError::Other)?;
+        let highest_ts = read.read_u64().map_err(ReadError::Other)?;
+        let target_checksum = read.read_u64().map_err(ReadError::Other)?;
         let actual_checksum = checksum_u64(&[data_offset, index_offset, highest_ts]);
 
         match target_checksum == actual_checksum {
             true => Ok(LogEntry {
-                data_offset: data_offset,
-                index_offset: index_offset,
-                highest_ts: highest_ts,
+                data_offset,
+                index_offset,
+                highest_ts,
             }),
             _ => Err(ReadError::CorruptedBlock),
         }
@@ -58,7 +58,7 @@ pub struct LogReader {
 
 impl LogReader {
     pub fn create(dir: Arc<SeriesDir>) -> LogReader {
-        LogReader { dir: dir.clone() }
+        LogReader { dir }
     }
 
     fn read_last_entry(&self, seq: u64) -> io::Result<Option<LogEntry>> {
@@ -121,11 +121,11 @@ impl LogWriter {
 
         let mut writer = LogWriter {
             file: dir.open(FileKind::Log(sequence), OpenMode::Write)?,
-            sequence: sequence,
-            sequences: sequences,
-            max_size: max_size,
+            sequence,
+            sequences,
+            max_size,
             current_size: 0,
-            dir: dir,
+            dir,
         };
 
         writer.cleanup()?;
@@ -178,7 +178,7 @@ impl LogWriter {
 mod test {
     use super::super::file_system;
     use super::super::test_utils::create_temp_dir;
-    use super::*;    
+    use super::*;
     use std::io::{Cursor, SeekFrom};
 
     #[test]
