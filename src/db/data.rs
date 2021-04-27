@@ -4,15 +4,17 @@ use std::io::SeekFrom;
 use std::io::{self, Cursor};
 use std::path::Path;
 
+use crate::db::compression::Compression;
 use crate::db::entry::Entry;
 use crate::db::io_utils::{self, ReadBytes, WriteBytes};
 
-const BLOCK_HEADER_SIZE: u64 = 4 + 4;
+const BLOCK_HEADER_SIZE: u64 = 4 + 1 + 4;
 
 pub struct DataWriter {
     file: File,
     offset: u64,
     buffer: Cursor<Vec<u8>>,
+    compression: Compression,
 }
 
 impl DataWriter {
@@ -24,18 +26,17 @@ impl DataWriter {
             file: file,
             offset: offset,
             buffer: Cursor::new(Vec::new()),
+            compression: Compression::Deflate,
         })
     }
     pub fn append(&mut self, block: &[&Entry]) -> io::Result<u64> {
         self.buffer.set_position(0);
-        for entry in block {
-            self.buffer.write_u64(&entry.ts)?;
-            self.buffer.write_f64(&entry.value)?;
-        }
+        self.compression.write(block, &mut self.buffer)?;
 
         let block_size = self.buffer.position();
 
         self.file.write_u32(&(block.len() as u32))?;
+        self.file.write_u8(&(self.compression.marker()))?;
         self.file.write_u32(&(block_size as u32))?;
         self.file.write_all(&self.buffer.get_ref()[0..block_size as usize])?;
 
@@ -60,17 +61,20 @@ impl DataReader {
     pub fn read_block(&mut self, offset: u64, destination: &mut Vec<Entry>) -> io::Result<u64> {
         self.file.seek(SeekFrom::Start(offset))?;
         let entries_count = self.file.read_u32()? as usize;
+
+        let compression = match Compression::from_marker(self.file.read_u8()?) {
+            Some(compression) => compression,
+            None => return Err(io::Error::new(io::ErrorKind::Other, "Unknown compression format")),
+        };
+
         let block_size = self.file.read_u32()? as usize;
 
         let mut block = vec![0u8; block_size];
         self.file.read_exact(&mut block)?;
-
+        
         let mut reader = Cursor::new(&block);
-        for _ in 0..entries_count {
-            destination.push(Entry {
-                ts: reader.read_u64()?,
-                value: reader.read_f64()?,
-            });
+        for entry in compression.read(&mut reader, entries_count as usize)? {
+            destination.push(entry);
         }
         Ok(offset + block_size as u64 + BLOCK_HEADER_SIZE)
     }

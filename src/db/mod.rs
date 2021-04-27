@@ -4,6 +4,7 @@ mod index;
 mod io_utils;
 mod log;
 mod table;
+mod compression;
 
 #[cfg(test)]
 mod test_utils;
