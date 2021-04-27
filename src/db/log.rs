@@ -1,10 +1,9 @@
-use super::io_utils::{self, checksum_u64, ReadBytes, ReadError, ReadResult, WriteBytes};
+use super::io_utils::{checksum_u64, ReadBytes, ReadError, ReadResult, WriteBytes};
 use super::file_system::{FileKind, OpenMode, SeriesDir};
 use std::collections::VecDeque;
-use std::fs::{read_dir, remove_file, File};
+use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, BufReader};
-use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct LogEntry {
