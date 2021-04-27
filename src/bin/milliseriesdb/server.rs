@@ -59,9 +59,8 @@ mod handlers {
     }
     pub async fn append_handler(id: String, entries: JsonEntries, db: DB) -> Result<impl warp::Reply, Infallible> {
         fn append_internal(id: String, entries: JsonEntries, db: DB) -> io::Result<Option<()>> {
-            match db.clone().get_series(id) {
-                Some(series) => {
-                    let mut writer = series.writer();
+            match db.clone().writer(id) {
+                Some(writer) => {
                     writer.append(&entries.entries, Compression::Delta)?;
                     Ok(Some(()))
                 }
@@ -79,8 +78,8 @@ mod handlers {
     }
     pub async fn query_handler(id: String, query_expr: QueryExpr, db: DB) -> Result<Box<dyn warp::Reply>, Infallible> {
         fn query_internal(id: String, query: Query, db: DB) -> io::Result<Option<Vec<Row>>> {
-            match db.clone().get_series(id) {
-                Some(series) => Ok(Some(Executor::new(&query).execute(series)?)),
+            match db.clone().reader(id) {
+                Some(reader) => Ok(Some(Executor::new(&query).execute(reader)?)),
                 None => Ok(None),
             }
         }

@@ -91,41 +91,42 @@ impl SeriesWriter {
 }
 
 pub struct SeriesReader {
-    index_reader: IndexReader,
-    log_entry: LogEntry,
     path: PathBuf,
 }
 
 impl SeriesReader {
     #[allow(dead_code)]
     pub fn create<P: AsRef<Path>>(path: P) -> io::Result<SeriesReader> {
-        create_dir_all(path.as_ref())?;
-        let last_entry = match log::read_last_log_entry(path.as_ref())? {
+        Ok(SeriesReader {
+            path: path.as_ref().to_path_buf(),
+        })
+    }
+
+    fn get_last_log_entry(&self) -> io::Result<LogEntry> {
+        Ok(match log::read_last_log_entry(self.path.clone())? {
             Some(entry) => entry,
             _ => LogEntry {
                 data_offset: 0,
                 index_offset: 0,
                 highest_ts: 0,
             },
-        };
-        Ok(SeriesReader {
-            index_reader: IndexReader::create(path.as_ref(), last_entry.index_offset)?,
-            log_entry: last_entry,
-            path: path.as_ref().to_path_buf(),
         })
     }
 
     #[allow(dead_code)]
-    pub fn iterator(&mut self, from_ts: u64) -> io::Result<SeriesIterator> {
-        let data_size = self.log_entry.data_offset;
-        let start_offset = match self.index_reader.ceiling_offset(from_ts)? {
+    pub fn iterator(&self, from_ts: u64) -> io::Result<SeriesIterator> {
+        let last_log_entry = self.get_last_log_entry()?;
+        
+        let mut index_reader = IndexReader::create(self.path.clone(), last_log_entry.index_offset)?;
+        let start_offset = match index_reader.ceiling_offset(from_ts)? {
             Some(offset) => offset,
-            _ => data_size,
+            _ => last_log_entry.data_offset,
         };
+        
         Ok(SeriesIterator {
             data_reader: DataReader::create(self.path.clone(), start_offset)?,
             offset: start_offset,
-            size: data_size,
+            size: last_log_entry.data_offset,
             from_ts: from_ts,
             buffer: VecDeque::new(),
         })
@@ -176,46 +177,19 @@ pub struct SeriesWriterGuard {
 }
 
 impl SeriesWriterGuard {
-    pub fn append(&mut self, batch: &[Entry], compression: Compression) -> io::Result<()> {
+    pub fn create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<SeriesWriterGuard> {
+        Ok(SeriesWriterGuard {
+            writer: Arc::new(Mutex::new(SeriesWriter::create(path.as_ref(), sync_mode)?)),
+        })
+    }
+
+    pub fn append(&self, batch: &[Entry], compression: Compression) -> io::Result<()> {
         let mut writer = self.writer.lock().unwrap();
         writer.append_batch(batch, compression)
     }
 }
 
-#[allow(dead_code)]
-pub struct Series {
-    writer: SeriesWriterGuard,
-    path: PathBuf,
-}
-
-impl Series {
-    #[allow(dead_code)]
-    pub fn open_or_create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<Series> {
-        Ok(Series {
-            writer: SeriesWriterGuard {
-                writer: Arc::new(Mutex::new(SeriesWriter::create(path.as_ref(), sync_mode)?)),
-            },
-            path: path.as_ref().to_path_buf(),
-        })
-    }
-    pub fn writer(&self) -> SeriesWriterGuard {
-        self.writer.clone()
-    }
-    #[allow(dead_code)]
-    pub fn iterator(&self, from_ts: u64) -> io::Result<SeriesIterator> {
-        let mut reader = SeriesReader::create(&self.path)?;
-        reader.iterator(from_ts)
-    }
-}
-
-impl IntoEntriesIterator for Series {
-    type Iter = SeriesIterator;
-    fn into_iter(&self, from: u64) -> io::Result<Self::Iter> {
-        self.iterator(from)
-    }
-}
-
-impl IntoEntriesIterator for Arc<Series> {
+impl IntoEntriesIterator for Arc<SeriesReader> {
     type Iter = SeriesIterator;
     fn into_iter(&self, from: u64) -> io::Result<Self::Iter> {
         self.iterator(from)
@@ -253,18 +227,18 @@ mod test {
             writer.append_batch(&entries[8..11], Compression::None).unwrap();
         }
 
-        let mut snapshot_1 = SeriesReader::create(&db_dir.path).unwrap();
+        let reader = SeriesReader::create(&db_dir.path).unwrap();
         assert_eq!(
             entries[3..11].to_vec(),
-            snapshot_1.iterator(4).unwrap().map(|e| e.unwrap()).collect::<Vec<Entry>>()
+            reader.iterator(4).unwrap().map(|e| e.unwrap()).collect::<Vec<Entry>>()
         );
         assert_eq!(
             entries[6..11].to_vec(),
-            snapshot_1.iterator(15).unwrap().map(|e| e.unwrap()).collect::<Vec<Entry>>()
+            reader.iterator(15).unwrap().map(|e| e.unwrap()).collect::<Vec<Entry>>()
         );
         assert_eq!(
             entries[1..11].to_vec(),
-            snapshot_1.iterator(2).unwrap().map(|e| e.unwrap()).collect::<Vec<Entry>>()
+            reader.iterator(2).unwrap().map(|e| e.unwrap()).collect::<Vec<Entry>>()
         );
 
         {
@@ -272,15 +246,9 @@ mod test {
             writer.append_batch(&entries[11..13], Compression::None).unwrap();
         }
 
-        let mut snapshot_2 = SeriesReader::create(&db_dir.path).unwrap();
         assert_eq!(
             entries[1..13].to_vec(),
-            snapshot_2.iterator(2).unwrap().map(|e| e.unwrap()).collect::<Vec<Entry>>()
-        );
-
-        assert_eq!(
-            entries[1..11].to_vec(),
-            snapshot_1.iterator(2).unwrap().map(|e| e.unwrap()).collect::<Vec<Entry>>()
+            reader.iterator(2).unwrap().map(|e| e.unwrap()).collect::<Vec<Entry>>()
         );
     }
 }
