@@ -1,29 +1,153 @@
-use milliseriesdb::db::{SyncMode, DB};
-use std::io;
+use milliseriesdb::db::{Entry, SyncMode, DB};
+use serde_derive::{Deserialize, Serialize};
+use std::convert::Infallible;
 use std::env;
+use std::io;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 use std::process::exit;
-use warp::Filter;
+use std::sync::{Arc, Mutex};
+use warp::{http::StatusCode, Filter};
 
-struct Server {
+struct DBGuard {
     db: Arc<Mutex<DB>>,
-    port: u16,
 }
 
-impl Server {
-    fn create<P: AsRef<Path>>(base_path: P, port: u16) -> io::Result<Server> {
-        Ok(Server {
-            db: Arc::new(Mutex::new(DB::open(base_path, SyncMode::Every(100))?)),
-            port: port,
-        })
+impl DBGuard {
+    fn with_db(&self) -> impl Filter<Extract = (Arc<Mutex<DB>>,), Error = Infallible> + Clone {
+        let db = self.db.clone();
+        warp::any().map(move || db.clone())
     }
+}
 
-    async fn run(&mut self) {
-        let get_series = warp::path!("series" / String).map(|name| format!("Here are series: {}", name));
+#[derive(Deserialize, Serialize)]
+pub struct JsonEntry {
+    pub timestamp: u64,
+    pub value: f64,
+}
 
-        warp::serve(get_series).run(([127, 0, 0, 1], self.port)).await
+#[derive(Deserialize, Serialize)]
+pub struct JsonEntries {
+    pub entries: Vec<JsonEntry>,
+}
+
+impl JsonEntries {
+    pub fn to_entries(&self) -> Vec<Entry> {
+        self.entries
+            .iter()
+            .map(|json| Entry {
+                ts: json.timestamp,
+                value: json.value,
+            })
+            .collect()
     }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct JsonQuery {
+    pub from: String,
+    pub limit: Option<usize>,
+}
+
+impl JsonQuery {
+    pub fn from_timestamp(&self) -> Option<u64> {
+        self.from.parse::<u64>().ok()
+    }
+}
+
+mod handlers {
+    use super::*;
+    pub fn create_handler(id: String, db: Arc<Mutex<DB>>) -> impl warp::Reply {
+        let mut db = db.lock().unwrap();
+
+        match db.create_series(&id) {
+            Ok(_) => StatusCode::CREATED,
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+    pub fn append_handler(id: String, entries: JsonEntries, db: Arc<Mutex<DB>>) -> impl warp::Reply {
+        fn append(id: String, entries: JsonEntries, db: Arc<Mutex<DB>>) -> io::Result<Option<()>> {
+            let series = {
+                let mut db = db.lock().unwrap();
+                db.get_series(id)
+            }?;
+            match series {
+                Some(series) => {
+                    let mut series = series.lock().unwrap();
+                    series.append(&entries.to_entries())?;
+                    Ok(Some(()))
+                }
+                None => Ok(None),
+            }
+        }
+
+        match append(id, entries, db) {
+            Ok(None) => StatusCode::NOT_FOUND,
+            Ok(Some(_)) => StatusCode::OK,
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+    pub fn query_handler(id: String, query: JsonQuery, db: Arc<Mutex<DB>>) -> Box<dyn warp::Reply> {
+        fn query_internal(id: String, from_timestamp: u64, limit: usize, db: Arc<Mutex<DB>>) -> io::Result<Option<JsonEntries>> {
+            let series = {
+                let mut db = db.lock().unwrap();
+                db.get_series(id)
+            }?;
+            match series {
+                Some(series) => {
+                    let iterator = {
+                        let mut series = series.lock().unwrap();
+                        series.iterator(from_timestamp)
+                    }?;
+                    let mut entries: Vec<JsonEntry> = Vec::new();
+                    for entry in iterator.take(limit) {
+                        let entry = entry?;
+                        entries.push(JsonEntry {
+                            timestamp: entry.ts,
+                            value: entry.value,
+                        });
+                    }
+                    Ok(Some(JsonEntries { entries: entries }))
+                }
+                None => Ok(None),
+            }
+        }
+        
+        match (query.from_timestamp(), query.limit.unwrap_or(1000)) {
+            (Some(from_timestamp), limit) => match query_internal(id, from_timestamp, limit, db) {
+                Ok(None) => Box::new(StatusCode::NOT_FOUND),
+                Ok(Some(entries)) => Box::new(warp::reply::json(&entries)),
+                Err(_) => Box::new(StatusCode::INTERNAL_SERVER_ERROR),
+            },
+            _ => Box::new(StatusCode::BAD_REQUEST)
+        }
+    }
+}
+
+async fn start_server<P: AsRef<Path>>(base_path: P, port: u16) -> io::Result<()> {
+    let db = DBGuard {
+        db: Arc::new(Mutex::new(DB::open(base_path, SyncMode::Every(100))?)),
+    };
+
+    let create_series = warp::path!("series" / String)
+        .and(warp::put())
+        .and(db.with_db())
+        .map(handlers::create_handler);
+
+    let append_to_series = warp::path!("series" / String)
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(db.with_db())
+        .map(handlers::append_handler);
+
+    let query_series = warp::path!("series" / String)
+        .and(warp::get())
+        .and(warp::query::<JsonQuery>())
+        .and(db.with_db())
+        .map(handlers::query_handler);
+
+    let server_api = create_series.or(append_to_series).or(query_series);
+
+    Ok(warp::serve(server_api).run(([127, 0, 0, 1], port)).await)
 }
 
 #[tokio::main]
@@ -32,10 +156,7 @@ async fn main() {
     args.next();
 
     match (args.next(), args.next().and_then(|port| port.parse::<u16>().ok())) {
-        (Some(base_path), Some(port)) => {
-            let mut server = Server::create(base_path, port).unwrap();
-            server.run().await;
-        }
-        _ => exit(1)
+        (Some(base_path), Some(port)) => start_server(base_path, port).await.unwrap(),
+        _ => exit(1),
     }
 }
