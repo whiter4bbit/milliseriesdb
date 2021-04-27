@@ -457,6 +457,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "integer-encoding"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90c11140ffea82edce8dcd74137ce9324ec24b3cf0175fc9d7e29164da9915b8"
+
+[[package]]
 name = "itoa"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -513,6 +519,7 @@ dependencies = [
  "flate2",
  "http",
  "hyper",
+ "integer-encoding",
  "log",
  "serde",
  "serde_derive",

@@ -1,4 +1,4 @@
-GET http://localhost:8080/series/temp
+GET http://localhost:8080/series/temp-100-none
     ?from=10
     &group_by=day
     &aggregators=mean

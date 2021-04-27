@@ -123,7 +123,7 @@ impl SeriesReader {
             _ => data_size,
         };
         Ok(SeriesIterator {
-            data_reader: DataReader::create(self.path.clone(), start_offset, data_size)?,
+            data_reader: DataReader::create(self.path.clone(), start_offset)?,
             offset: start_offset,
             size: data_size,
             from_ts: from_ts,
@@ -143,13 +143,10 @@ pub struct SeriesIterator {
 impl SeriesIterator {
     fn fetch_block(&mut self) -> io::Result<()> {
         if self.offset < self.size {
-            let mut block = Vec::new();
-            self.offset = self.data_reader.read_block(&mut block)?;
+            self.offset = self.data_reader.read_block(&mut self.buffer)?;
 
-            for entry in block {
-                if entry.ts >= self.from_ts {
-                    self.buffer.push_back(entry);
-                }
+            while self.buffer.front().filter(|e| e.ts < self.from_ts).is_some() {
+                self.buffer.pop_front();
             }
         }
         Ok(())

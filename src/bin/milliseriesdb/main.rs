@@ -7,14 +7,14 @@ mod server;
 
 #[tokio::main]
 async fn main() {
-    stderrlog::new().module(module_path!()).init().unwrap();
+    stderrlog::new().module(module_path!()).verbosity(4).init().unwrap();
 
     let matches = clap_app!(milliseriesdb =>
         (@setting SubcommandRequiredElseHelp)
         (@arg path: -p <PATH> --path "path to database")
-        (@arg compression: -i <COMPRESSION> --compression default_value("deflate") possible_value[none deflate] "compression")
+        (@arg compression: -i <COMPRESSION> --compression default_value("deflate") possible_value[none deflate delta] "compression")
         (@subcommand append =>
-            (about: "appends entries to the series")
+            (about: "append entries to the series")
             (@arg series: -s <SERIES> --series "id of the series")
             (@arg csv: -c <CSV> --csv "path to csv (timestamp; value)")
             (@arg batch_size: -b <BATCH> --batch default_value("100") "batch size")
@@ -27,7 +27,7 @@ async fn main() {
         )
         (@subcommand server =>
             (about: "start the server")
-            (@arg addr: -a <ADDR> --addr "listen address, like 0.0.0.0:8080")
+            (@arg addr: -a <ADDR> --addr default_value("127.0.0.1:8080") "listen address, like 0.0.0.0:8080")
         )
     )
     .get_matches();
@@ -37,6 +37,7 @@ async fn main() {
         SyncMode::Every(100),
         match matches.value_of("compression").unwrap() {
             "deflate" => Compression::Deflate,
+            "delta" => Compression::Delta,
             _ => Compression::None,
         },
     )
