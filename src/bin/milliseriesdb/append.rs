@@ -20,12 +20,11 @@ impl FromStr for CsvEntry {
     }
 }
 
-pub fn append(db: &mut DB, series_id: &str, input_csv: &str) -> io::Result<()> {
-    fn append_internal(db: &mut DB, series_id: &str, reader: Box<dyn BufRead>) -> io::Result<()> {
+pub fn append(db: &mut DB, series_id: &str, input_csv: &str, batch_size: usize) -> io::Result<()> {
+    fn append_internal(db: &mut DB, series_id: &str, batch_size: usize, reader: Box<dyn BufRead>) -> io::Result<()> {
         let series = db.create_series(series_id)?;
         let mut writer = series.writer();
         let mut buffer = Vec::new();
-        let batch_size = 100;
         for entry in reader.lines() {
             let CsvEntry(ts, val) = entry?.parse::<CsvEntry>()?;
             buffer.push(Entry { ts: ts, value: val });
@@ -43,6 +42,7 @@ pub fn append(db: &mut DB, series_id: &str, input_csv: &str) -> io::Result<()> {
     append_internal(
         db,
         series_id,
+        batch_size,
         if input_csv.ends_with(".gz") {
             Box::new(BufReader::new(GzDecoder::new(File::open(input_csv)?)?))
         } else {

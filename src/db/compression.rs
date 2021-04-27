@@ -5,6 +5,7 @@ use flate2::write::DeflateEncoder;
 use flate2::Compression as DeflateCompression;
 use std::io::{self, Read, Write};
 
+#[derive(Clone)]
 pub enum Compression {
     None,
     Deflate,
