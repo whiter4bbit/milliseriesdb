@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use std::fs::create_dir_all;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -170,9 +171,21 @@ impl Iterator for SeriesIterator {
     }
 }
 
+#[derive(Clone)]
+pub struct SeriesWriterGuard {
+    writer: Arc<Mutex<SeriesWriter>>,
+}
+
+impl SeriesWriterGuard {
+    pub fn append(&mut self, batch: &[Entry]) -> io::Result<()> {
+        let mut writer = self.writer.lock().unwrap();
+        writer.append_batch(batch)
+    }
+}
+
 #[allow(dead_code)]
 pub struct Series {
-    writer: SeriesWriter,
+    writer: SeriesWriterGuard,
     path: PathBuf,
 }
 
@@ -180,16 +193,17 @@ impl Series {
     #[allow(dead_code)]
     pub fn open_or_create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<Series> {
         Ok(Series {
-            writer: SeriesWriter::create(path.as_ref(), sync_mode)?,
+            writer: SeriesWriterGuard {
+                writer: Arc::new(Mutex::new(SeriesWriter::create(path.as_ref(), sync_mode)?)),
+            },
             path: path.as_ref().to_path_buf(),
         })
     }
-    #[allow(dead_code)]
-    pub fn append(&mut self, batch: &[Entry]) -> io::Result<()> {
-        self.writer.append_batch(batch)
+    pub fn writer(&self) -> SeriesWriterGuard {
+        self.writer.clone()
     }
     #[allow(dead_code)]
-    pub fn iterator(&mut self, from_ts: u64) -> io::Result<SeriesIterator> {
+    pub fn iterator(&self, from_ts: u64) -> io::Result<SeriesIterator> {
         let mut reader = SeriesReader::create(&self.path)?;
         reader.iterator(from_ts)
     }

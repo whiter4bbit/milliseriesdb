@@ -6,7 +6,7 @@ use std::io::{self, BufRead, BufReader};
 pub fn append(db: &mut DB, series_id: &str, input_csv: &str) -> io::Result<()> {
     fn append_internal<R: BufRead>(db: &mut DB, series_id: &str, reader: R) -> io::Result<()> {
         let series = db.create_series(series_id)?;
-        let mut series = series.lock().unwrap();
+        let mut writer = series.writer();
         let mut buffer = Vec::new();
         let batch_size = 100;
         for entry in reader.lines() {
@@ -24,7 +24,7 @@ pub fn append(db: &mut DB, series_id: &str, input_csv: &str) -> io::Result<()> {
                         buffer.push(entry.unwrap());
                     }
                     if buffer.len() == batch_size {
-                        series.append(&buffer)?;
+                        writer.append(&buffer)?;
                         buffer.clear();
                     }
                 }
@@ -32,7 +32,7 @@ pub fn append(db: &mut DB, series_id: &str, input_csv: &str) -> io::Result<()> {
             }
         }
         if !buffer.is_empty() {
-            series.append(&buffer)?;
+            writer.append(&buffer)?;
         }
         Ok(())
     }

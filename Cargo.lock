@@ -498,6 +498,8 @@ dependencies = [
  "bytes",
  "clap",
  "flate2",
+ "http",
+ "hyper",
  "serde",
  "serde_derive",
  "serde_json",
