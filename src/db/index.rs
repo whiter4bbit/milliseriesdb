@@ -20,12 +20,14 @@ impl IndexWriter {
             file: file,
         })
     }
-
     pub fn append(&mut self, ts: u64, offset: u64) -> io::Result<u64> {
         self.file.write_all(&ts.to_be_bytes())?;
         self.file.write_all(&offset.to_be_bytes())?;
         self.offset += INDEX_ENTRY_LENGTH;
         Ok(self.offset)
+    }
+    pub fn sync(&mut self) -> io::Result<()> {
+        self.file.sync_data()
     }
 }
 

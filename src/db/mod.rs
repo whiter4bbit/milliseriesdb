@@ -8,9 +8,10 @@ mod table;
 #[cfg(test)]
 mod test_utils;
 
-use entry::Entry;
+pub use entry::Entry;
 use std::io;
 use std::path::{Path, PathBuf};
+pub use table::SyncMode;
 use table::{TableIterator, TableReader, TableWriter};
 
 #[allow(dead_code)]
@@ -21,9 +22,9 @@ pub struct DB {
 
 impl DB {
     #[allow(dead_code)]
-    pub fn open_or_create<P: AsRef<Path>>(path: P) -> io::Result<DB> {
+    pub fn open_or_create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<DB> {
         Ok(DB {
-            writer: TableWriter::create(path.as_ref())?,
+            writer: TableWriter::create(path.as_ref(), sync_mode)?,
             path: path.as_ref().to_path_buf(),
         })
     }

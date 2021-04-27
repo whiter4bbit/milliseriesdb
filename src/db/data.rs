@@ -7,31 +7,43 @@ use std::path::Path;
 use crate::db::entry::Entry;
 use crate::db::io_utils::{self, ReadBytes, WriteBytes};
 
+const BLOCK_HEADER_SIZE: u64 = 4 + 4;
+
 pub struct DataWriter {
     file: File,
     offset: u64,
+    buffer: Cursor<Vec<u8>>,
 }
 
 impl DataWriter {
     pub fn create<P: AsRef<Path>>(path: P, offset: u64) -> io::Result<DataWriter> {
         let mut file = io_utils::open_writable(path.as_ref().join("series.dat"))?;
         file.seek(SeekFrom::Start(offset))?;
+
         Ok(DataWriter {
             file: file,
             offset: offset,
+            buffer: Cursor::new(Vec::new()),
         })
     }
     pub fn append(&mut self, block: &[&Entry]) -> io::Result<u64> {
-        let mut raw = Vec::new();
+        self.buffer.set_position(0);
         for entry in block {
-            raw.write_u64(&entry.ts)?;
-            raw.write_f64(&entry.value)?;
+            self.buffer.write_u64(&entry.ts)?;
+            self.buffer.write_f64(&entry.value)?;
         }
-        self.offset += raw.len() as u64 + 4 + 4;
+
+        let block_size = self.buffer.position();
+
         self.file.write_u32(&(block.len() as u32))?;
-        self.file.write_u32(&(raw.len() as u32))?;
-        self.file.write_all(&raw)?;
+        self.file.write_u32(&(block_size as u32))?;
+        self.file.write_all(&self.buffer.get_ref()[0..block_size as usize])?;
+
+        self.offset += block_size + BLOCK_HEADER_SIZE;
         Ok(self.offset)
+    }
+    pub fn sync(&mut self) -> io::Result<()> {
+        self.file.sync_data()
     }
 }
 
@@ -47,7 +59,6 @@ impl DataReader {
     }
     pub fn read_block(&mut self, offset: u64, destination: &mut Vec<Entry>) -> io::Result<u64> {
         self.file.seek(SeekFrom::Start(offset))?;
-
         let entries_count = self.file.read_u32()? as usize;
         let block_size = self.file.read_u32()? as usize;
 
@@ -61,7 +72,7 @@ impl DataReader {
                 value: reader.read_f64()?,
             });
         }
-        Ok(offset + 4 + 4 + block_size as u64)
+        Ok(offset + block_size as u64 + BLOCK_HEADER_SIZE)
     }
 }
 
