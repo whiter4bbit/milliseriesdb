@@ -1,8 +1,8 @@
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-#[derive(Clone)]
 pub enum FileKind {
     #[allow(dead_code)]
     Data,
@@ -12,7 +12,6 @@ pub enum FileKind {
     Log(u64),
 }
 
-#[derive(Clone)]
 pub enum OpenMode {
     #[allow(dead_code)]
     Read,
@@ -20,7 +19,6 @@ pub enum OpenMode {
     Write,
 }
 
-#[derive(Clone)]
 pub struct SeriesDir {
     base_path: PathBuf,
 }
@@ -66,19 +64,18 @@ impl SeriesDir {
     }
 }
 
-#[derive(Clone)]
 pub struct FileSystem {
     base_path: PathBuf,
 }
 
 impl FileSystem {
-    pub fn series<S: AsRef<str>>(&self, name: S) -> io::Result<SeriesDir> {
+    pub fn series<S: AsRef<str>>(&self, name: S) -> io::Result<Arc<SeriesDir>> {
         let base_path = self.base_path.join("series").join(name.as_ref());
         fs::create_dir_all(&base_path)?;
 
-        Ok(SeriesDir {
+        Ok(Arc::new(SeriesDir {
             base_path: base_path,
-        })
+        }))
     }
 
     pub fn get_series(&self) -> io::Result<Vec<String>> {
@@ -101,7 +98,6 @@ impl FileSystem {
 
 pub fn open<P: AsRef<Path>>(base_path: P) -> io::Result<FileSystem> {
     fs::create_dir_all(base_path.as_ref().join("series"))?;
-    
     Ok(FileSystem {
         base_path: base_path.as_ref().to_owned(),
     })

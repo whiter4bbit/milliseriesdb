@@ -33,10 +33,7 @@ pub struct SeriesWriter {
 
 impl SeriesWriter {
     #[allow(dead_code)]
-    pub fn create(
-        dir: &SeriesDir,
-        sync_mode: SyncMode,
-    ) -> io::Result<SeriesWriter> {
+    pub fn create(dir: Arc<SeriesDir>, sync_mode: SyncMode) -> io::Result<SeriesWriter> {
         let log_reader = LogReader::create(dir.clone());
 
         let last_entry = log_reader.get_last_entry_or_default()?;
@@ -100,13 +97,13 @@ impl SeriesWriter {
 }
 
 pub struct SeriesReader {
-    dir: SeriesDir,
+    dir: Arc<SeriesDir>,
     log_reader: LogReader,
 }
 
 impl SeriesReader {
     #[allow(dead_code)]
-    pub fn create(dir: SeriesDir) -> io::Result<SeriesReader> {
+    pub fn create(dir: Arc<SeriesDir>) -> io::Result<SeriesReader> {
         Ok(SeriesReader {
             dir: dir.clone(),
             log_reader: LogReader::create(dir.clone()),
@@ -189,15 +186,9 @@ pub struct SeriesWriterGuard {
 }
 
 impl SeriesWriterGuard {
-    pub fn create(
-        dir: &SeriesDir,
-        sync_mode: SyncMode,
-    ) -> io::Result<SeriesWriterGuard> {
+    pub fn create(dir: Arc<SeriesDir>, sync_mode: SyncMode) -> io::Result<SeriesWriterGuard> {
         Ok(SeriesWriterGuard {
-            writer: Arc::new(Mutex::new(SeriesWriter::create(
-                dir,
-                sync_mode,
-            )?)),
+            writer: Arc::new(Mutex::new(SeriesWriter::create(dir, sync_mode)?)),
         })
     }
 
@@ -280,11 +271,7 @@ mod test {
             },
         ];
         {
-            let mut writer = SeriesWriter::create(
-                &series_dir,
-                SyncMode::Never,
-            )
-            .unwrap();
+            let mut writer = SeriesWriter::create(series_dir.clone(), SyncMode::Never).unwrap();
             writer
                 .append_batch(&entries[0..5], Compression::None)
                 .unwrap();
@@ -323,11 +310,7 @@ mod test {
         );
 
         {
-            let mut writer = SeriesWriter::create(
-                &series_dir,
-                SyncMode::Never,
-            )
-            .unwrap();
+            let mut writer = SeriesWriter::create(series_dir, SyncMode::Never).unwrap();
             writer
                 .append_batch(&entries[11..13], Compression::None)
                 .unwrap();

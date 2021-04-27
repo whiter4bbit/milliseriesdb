@@ -17,7 +17,7 @@ impl SeriesEntry {
     ) -> io::Result<SeriesEntry> {
         Ok(SeriesEntry {
             writer: Arc::new(SeriesWriterGuard::create(
-                &fs.series(name.as_ref())?,
+                fs.series(name.as_ref())?,
                 sync_mode,
             )?),
             reader: Arc::new(SeriesReader::create(fs.series(name.as_ref())?)?),

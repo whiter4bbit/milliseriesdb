@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, BufReader};
+use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct LogEntry {
@@ -52,12 +53,12 @@ impl LogEntry {
 }
 
 pub struct LogReader {
-    dir: SeriesDir,
+    dir: Arc<SeriesDir>,
 }
 
 impl LogReader {
-    pub fn create(dir: SeriesDir) -> LogReader {
-        LogReader { dir: dir }
+    pub fn create(dir: Arc<SeriesDir>) -> LogReader {
+        LogReader { dir: dir.clone() }
     }
 
     fn read_last_entry(&self, seq: u64) -> io::Result<Option<LogEntry>> {
@@ -94,11 +95,11 @@ pub struct LogWriter {
     max_size: u64,
     current_size: u64,
     sequences: VecDeque<u64>,
-    dir: SeriesDir,
+    dir: Arc<SeriesDir>,
 }
 
 impl LogWriter {
-    pub fn create(dir: SeriesDir, max_size: u64) -> io::Result<LogWriter> {
+    pub fn create(dir: Arc<SeriesDir>, max_size: u64) -> io::Result<LogWriter> {
         if max_size < LOG_ENTRY_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -287,7 +288,7 @@ mod test {
         }
 
         {
-            let reader = LogReader::create(series_dir.clone());
+            let reader = LogReader::create(series_dir);
             assert_eq!(entry4, reader.get_last_entry_or_default().unwrap());
         }
     }
@@ -305,12 +306,13 @@ mod test {
         let db_dir = create_temp_dir("test-path").unwrap();
         let fs = file_system::open(&db_dir.path).unwrap();
         let series_dir = fs.series("series1").unwrap();
+
         {
             let mut writer = LogWriter::create(series_dir.clone(), LOG_ENTRY_SIZE * 10).unwrap();
             for i in 1..=34 {
                 writer.append(&gen_entry(i as u64)).unwrap();
             }
         }
-        assert_eq!(vec![3, 2], series_dir.read_log_sequences().unwrap());
+        assert_eq!(vec![3, 2], series_dir.clone().read_log_sequences().unwrap());
     }
 }
