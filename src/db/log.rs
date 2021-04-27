@@ -1,4 +1,5 @@
 use super::io_utils::{self, checksum_u64, ReadBytes, ReadError, ReadResult, WriteBytes};
+use super::file_system::{FileKind, OpenMode, SeriesDir};
 use std::collections::VecDeque;
 use std::fs::{read_dir, remove_file, File};
 use std::io::prelude::*;
@@ -41,65 +42,60 @@ impl LogEntry {
     }
 }
 
-fn log_filename(sequence: u64) -> String {
-    return format!("series.log.{}", sequence);
+pub struct LogReader {
+    dir: SeriesDir,
 }
 
-fn parse_log_filename(base: &Path, s: &str) -> Option<(PathBuf, u64)> {
-    s.strip_prefix("series.log.")
-        .and_then(|suffix| suffix.parse::<u64>().ok().map(|seq| (base.join(s), seq)))
-}
+impl LogReader {
+    pub fn create(dir: SeriesDir) -> LogReader {
+        LogReader {
+            dir: dir,
+        }
+    }
 
-pub fn read_log_filenames<P: AsRef<Path>>(path: P) -> io::Result<Vec<(PathBuf, u64)>> {
-    let mut filenames = read_dir(path.as_ref())?
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter_map(|entry| parse_log_filename(path.as_ref(), &entry))
-        .collect::<Vec<(PathBuf, u64)>>();
-    filenames.sort_by_key(|(_, seq)| *seq);
-    filenames.reverse();
-    Ok(filenames)
-}
-
-fn read_last_log_entry_of(path: PathBuf) -> io::Result<Option<LogEntry>> {
-    let mut file = BufReader::new(io_utils::open_readable(path)?);
-    let mut last: Option<LogEntry> = None;
-    loop {
-        match LogEntry::read_entry(&mut file) {
-            Err(error) => match error {
-                ReadError::Other(other) => match other.kind() {
-                    io::ErrorKind::UnexpectedEof => break,
-                    _ => return Err(other),
+    fn read_last_entry(&self, seq: u64) -> io::Result<Option<LogEntry>> {
+        let mut file = BufReader::new(self.dir.open(FileKind::Log(seq), OpenMode::Read)?);
+        let mut last: Option<LogEntry> = None;
+        loop {
+            match LogEntry::read_entry(&mut file) {
+                Err(error) => match error {
+                    ReadError::Other(other) => match other.kind() {
+                        io::ErrorKind::UnexpectedEof => break,
+                        _ => return Err(other),
+                    },
+                    ReadError::CorruptedBlock => break,
                 },
-                ReadError::CorruptedBlock => break,
-            },
-            Ok(entry) => last = Some(entry),
+                Ok(entry) => last = Some(entry),
+            }
         }
+        Ok(last)    
     }
-    Ok(last)
-}
 
-pub fn read_last_log_entry<P: AsRef<Path>>(path: P) -> io::Result<Option<LogEntry>> {
-    for (log_path, _) in read_log_filenames(path)? {
-        match read_last_log_entry_of(log_path)? {
-            Some(entry) => return Ok(Some(entry)),
-            _ => continue,
+    pub fn get_last_entry_or_default(&self) -> io::Result<LogEntry> {
+        for seq in self.dir.read_log_sequences()? {
+            if let Some(entry) = self.read_last_entry(seq)? {
+                return Ok(entry)
+            }
         }
+        Ok(LogEntry {
+            data_offset: 0,
+            index_offset: 0,
+            highest_ts: 0,
+        })
     }
-    Ok(None)
 }
 
 pub struct LogWriter {
     file: File,
     sequence: u64,
-    path: PathBuf,
     max_size: u64,
     current_size: u64,
-    log_paths: VecDeque<(PathBuf, u64)>,
+    sequences: VecDeque<u64>,
+    dir: SeriesDir,
 }
 
 impl LogWriter {
-    pub fn create<P: AsRef<Path>>(path: P, max_size: u64) -> io::Result<LogWriter> {
+    pub fn create(dir: SeriesDir, max_size: u64) -> io::Result<LogWriter> {
         if max_size < LOG_ENTRY_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -107,21 +103,22 @@ impl LogWriter {
             ));
         }
 
-        let mut log_paths: VecDeque<(PathBuf, u64)> = read_log_filenames(path.as_ref())?.into_iter().collect();
+        let mut sequences: VecDeque<u64> = dir.read_log_sequences()?.into_iter().collect();
 
-        let (current_log_path, sequence) = match log_paths.front() {
-            Some((_, seq)) => (path.as_ref().join(log_filename(seq + 1)), seq + 1),
-            _ => (path.as_ref().join(log_filename(0)), 0),
+        let sequence = match sequences.front() {
+            Some(s) => s + 1,
+            _ => 0,
         };
-        log_paths.push_front((current_log_path.clone(), sequence));
+
+        sequences.push_front(sequence);
 
         let mut writer = LogWriter {
-            file: io_utils::open_writable(current_log_path.clone())?,
+            file: dir.open(FileKind::Log(sequence), OpenMode::Write)?,
             sequence: sequence,
-            path: path.as_ref().to_path_buf(),
+            sequences: sequences,
             max_size: max_size,
             current_size: 0,
-            log_paths: log_paths,
+            dir: dir,
         };
 
         writer.cleanup()?;
@@ -129,10 +126,9 @@ impl LogWriter {
         Ok(writer)
     }
     fn cleanup(&mut self) -> io::Result<()> {
-        while self.log_paths.len() > 2 {
-            if let Some((path, _)) = self.log_paths.pop_back() {
-                remove_file(path.clone())?;
-                log::debug!("Removed {:?}", path.clone());
+        while self.sequences.len() > 2 {
+            if let Some(s) = self.sequences.pop_back() {
+                self.dir.remove_log(s)?;
             }
         }
         Ok(())
@@ -145,14 +141,13 @@ impl LogWriter {
         self.file.sync_data()?;
 
         let next_sequence = self.sequence + 1;
-        let next_log_path = self.path.clone().join(&log_filename(next_sequence));
 
-        self.file = io_utils::open_writable(next_log_path.clone())?;
+        self.file = self.dir.open(FileKind::Log(next_sequence), OpenMode::Write)?;
 
         self.sequence = next_sequence;
         self.current_size = 0;
 
-        self.log_paths.push_front((next_log_path.clone(), self.sequence));
+        self.sequences.push_front(next_sequence);
 
         self.cleanup()
     }
@@ -172,6 +167,7 @@ impl LogWriter {
 #[cfg(test)]
 mod test {
     use super::*;
+    use super::super::file_system;
     use crate::db::test_utils::create_temp_dir;
     use std::io::{Cursor, SeekFrom};
 
@@ -219,6 +215,9 @@ mod test {
     #[test]
     fn test_writer() {
         let db_dir = create_temp_dir("test-path").unwrap();
+        let mut fs = file_system::open(&db_dir.path).unwrap();
+        let series_dir = fs.series("series1").unwrap();
+
         let entry1 = LogEntry {
             data_offset: 11,
             index_offset: 22,
@@ -250,30 +249,39 @@ mod test {
             highest_ts: 999,
         };
         {
-            let mut writer = LogWriter::create(&db_dir.path, 1024).unwrap();
+            let mut writer = LogWriter::create(series_dir.clone(), 1024).unwrap();
             writer.append(&entry1).unwrap();
             writer.append(&entry2).unwrap();
             writer.append(&entry3).unwrap();
         }
 
-        assert_eq!(Some(entry3), read_last_log_entry(&db_dir.path).unwrap());
-
         {
-            let mut writer = LogWriter::create(&db_dir.path, 1024).unwrap();
+            let reader = LogReader::create(series_dir.clone());
+            assert_eq!(entry3, reader.get_last_entry_or_default().unwrap());            
+        }
+        
+        {
+            let mut writer = LogWriter::create(series_dir.clone(), 1024).unwrap();
             writer.append(&entry4).unwrap();
             writer.append(&entry5).unwrap();
             writer.append(&entry6).unwrap();
         }
 
-        assert_eq!(Some(entry6), read_last_log_entry(&db_dir.path).unwrap());
+        {
+            let reader = LogReader::create(series_dir.clone());
+            assert_eq!(entry6, reader.get_last_entry_or_default().unwrap());            
+        }
 
         {
-            let mut file = io_utils::open_writable((&db_dir.path).join(log_filename(1))).unwrap();
+            let mut file = series_dir.open(FileKind::Log(1), OpenMode::Write).unwrap();
             file.seek(SeekFrom::Start(LOG_ENTRY_SIZE + 1)).unwrap();
             file.write_all(&[0, 1, 2, 3]).unwrap();
         }
 
-        assert_eq!(Some(entry4), read_last_log_entry(&db_dir.path).unwrap());
+        {
+            let reader = LogReader::create(series_dir.clone());
+            assert_eq!(entry4, reader.get_last_entry_or_default().unwrap());            
+        }
     }
 
     fn gen_entry(seq: u64) -> LogEntry {
@@ -287,18 +295,18 @@ mod test {
     #[test]
     fn test_rotate() {
         let db_dir = create_temp_dir("test-path").unwrap();
+        let mut fs = file_system::open(&db_dir.path).unwrap();
+        let series_dir = fs.series("series1").unwrap();
+        
         {
-            let mut writer = LogWriter::create(&db_dir.path, LOG_ENTRY_SIZE * 10).unwrap();
+            let mut writer = LogWriter::create(series_dir.clone(), LOG_ENTRY_SIZE * 10).unwrap();
             for i in 1..=34 {
                 writer.append(&gen_entry(i as u64)).unwrap();
             }
         }
         assert_eq!(
-            vec![
-                ((&db_dir.path.join("series.log.3")).to_path_buf(), 3),
-                ((&db_dir.path.join("series.log.2")).to_path_buf(), 2),
-            ],
-            read_log_filenames(&db_dir.path).unwrap()
+            vec![3, 2],
+            series_dir.read_log_sequences().unwrap()
         );
     }
 }

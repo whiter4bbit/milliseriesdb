@@ -1,11 +1,10 @@
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, BufReader, Cursor, SeekFrom};
-use std::path::Path;
 
 use super::compression::Compression;
 use super::entry::Entry;
-use super::io_utils::{self, ReadBytes, WriteBytes};
+use super::io_utils::{ReadBytes, WriteBytes};
 
 const BLOCK_HEADER_SIZE: u64 = 4 + 1 + 4;
 
@@ -20,7 +19,12 @@ impl BlockHeader {
         let entries_count = file.read_u32()? as usize;
         let compression = match Compression::from_marker(file.read_u8()?) {
             Some(compression) => compression,
-            None => return Err(io::Error::new(io::ErrorKind::Other, "Unknown compression format")),
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "Unknown compression format",
+                ))
+            }
         };
         let payload_size = file.read_u32()? as usize;
         Ok(BlockHeader {
@@ -44,15 +48,16 @@ pub struct DataWriter {
 }
 
 impl DataWriter {
-    pub fn create<P: AsRef<Path>>(path: P, offset: u64) -> io::Result<DataWriter> {
-        let mut file = io_utils::open_writable(path.as_ref().join("series.dat"))?;
-        file.seek(SeekFrom::Start(offset))?;
-
-        Ok(DataWriter {
+    pub fn create(file: File, offset: u64) -> io::Result<DataWriter> {
+        let mut writer = DataWriter {
             file: file,
             offset: offset,
             buffer: Cursor::new(Vec::new()),
-        })
+        };
+
+        writer.file.seek(SeekFrom::Start(offset))?;
+
+        Ok(writer)
     }
     pub fn append(&mut self, block: &[&Entry], compression: Compression) -> io::Result<u64> {
         self.buffer.set_position(0);
@@ -66,7 +71,8 @@ impl DataWriter {
             payload_size: block_size as usize,
         }
         .write(&mut self.file)?;
-        self.file.write_all(&self.buffer.get_ref()[0..block_size as usize])?;
+        self.file
+            .write_all(&self.buffer.get_ref()[0..block_size as usize])?;
 
         self.offset += block_size + BLOCK_HEADER_SIZE;
         Ok(self.offset)
@@ -82,19 +88,25 @@ pub struct DataReader {
 }
 
 impl DataReader {
-    pub fn create<P: AsRef<Path>>(path: P, start_offset: u64) -> io::Result<DataReader> {
-        let mut file = io_utils::open_readable(path.as_ref().join("series.dat"))?;
-        file.seek(SeekFrom::Start(start_offset))?;
-        Ok(DataReader {
+    pub fn create(file: File, start_offset: u64) -> io::Result<DataReader> {
+        let mut reader = DataReader {
             file: BufReader::with_capacity(2 * 1024 * 1024, file),
             offset: start_offset,
-        })
+        };
+
+        reader.file.seek(SeekFrom::Start(start_offset))?;
+
+        Ok(reader)
     }
 
     pub fn read_block<D: Extend<Entry>>(&mut self, destination: &mut D) -> io::Result<u64> {
         let header = BlockHeader::read(&mut self.file)?;
         let mut payload = self.file.by_ref().take(header.payload_size as u64);
-        destination.extend(header.compression.read(&mut payload, header.entries_count)?);
+        destination.extend(
+            header
+                .compression
+                .read(&mut payload, header.entries_count)?,
+        );
         self.offset += header.payload_size as u64 + BLOCK_HEADER_SIZE;
         Ok(self.offset)
     }
@@ -102,11 +114,14 @@ impl DataReader {
 
 #[cfg(test)]
 mod test {
+    use super::super::file_system::{self, FileKind, OpenMode};
     use super::*;
     use crate::db::test_utils::create_temp_dir;
     #[test]
     fn test_read_write() {
         let db_dir = create_temp_dir("test-path").unwrap();
+        let fs = file_system::open(&db_dir.path).unwrap();
+        let series_dir = fs.series("series1").unwrap();
 
         let entries = vec![
             Entry { ts: 1, value: 11.0 },
@@ -116,12 +131,26 @@ mod test {
             Entry { ts: 5, value: 51.0 },
         ];
 
-        let mut writer = DataWriter::create(&db_dir.path, 0).unwrap();
-        writer.append(&entries[0..3].iter().collect::<Vec<&Entry>>(), Compression::Deflate).unwrap();
-        writer.append(&entries[3..5].iter().collect::<Vec<&Entry>>(), Compression::Deflate).unwrap();
+        let mut writer =
+            DataWriter::create(series_dir.open(FileKind::Data, OpenMode::Write).unwrap(), 0)
+                .unwrap();
+        writer
+            .append(
+                &entries[0..3].iter().collect::<Vec<&Entry>>(),
+                Compression::Deflate,
+            )
+            .unwrap();
+        writer
+            .append(
+                &entries[3..5].iter().collect::<Vec<&Entry>>(),
+                Compression::Deflate,
+            )
+            .unwrap();
 
         {
-            let mut reader = DataReader::create(&db_dir.path, 0).unwrap();
+            let mut reader =
+                DataReader::create(series_dir.open(FileKind::Data, OpenMode::Read).unwrap(), 0)
+                    .unwrap();
             let mut result: Vec<Entry> = Vec::new();
 
             reader.read_block(&mut result).unwrap();
