@@ -27,7 +27,7 @@ impl TableWriter {
                 highest_ts: 0,
             },
         };
-        let mut log_writer = LogWriter::create(path.as_ref())?;
+        let mut log_writer = LogWriter::create(path.as_ref(), 1024 * 1024)?;
         log_writer.append(&last_entry)?;
         Ok(TableWriter {
             data_writer: DataWriter::create(path.as_ref(), last_entry.data_offset)?,

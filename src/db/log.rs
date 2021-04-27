@@ -11,6 +11,9 @@ pub struct LogEntry {
     pub highest_ts: u64,
 }
 
+#[allow(dead_code)]
+const LOG_ENTRY_SIZE: u64 = 8 + 8 + 8 + 8;
+
 impl LogEntry {
     fn read_entry<R: Read>(read: &mut R) -> ReadResult<LogEntry> {
         let data_offset = read.read_u64().map_err(|e| ReadError::Other(e))?;
@@ -37,17 +40,21 @@ impl LogEntry {
     }
 }
 
-fn parse_log_filename(base: &Path, s: &str) -> Option<(PathBuf, u8)> {
-    s.strip_prefix("series.log.")
-        .and_then(|suffix| suffix.parse::<u8>().ok().map(|seq| (base.join(s), seq)))
+fn log_filename(sequence: u64) -> String {
+    return format!("series.log.{}", sequence);
 }
 
-pub fn read_log_filenames<P: AsRef<Path>>(path: P) -> io::Result<Vec<(PathBuf, u8)>> {
+fn parse_log_filename(base: &Path, s: &str) -> Option<(PathBuf, u64)> {
+    s.strip_prefix("series.log.")
+        .and_then(|suffix| suffix.parse::<u64>().ok().map(|seq| (base.join(s), seq)))
+}
+
+pub fn read_log_filenames<P: AsRef<Path>>(path: P) -> io::Result<Vec<(PathBuf, u64)>> {
     let mut filenames = read_dir(path.as_ref())?
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| entry.file_name().into_string().ok())
         .filter_map(|entry| parse_log_filename(path.as_ref(), &entry))
-        .collect::<Vec<(PathBuf, u8)>>();
+        .collect::<Vec<(PathBuf, u64)>>();
     filenames.sort_by_key(|(_, seq)| *seq);
     filenames.reverse();
     Ok(filenames)
@@ -83,21 +90,48 @@ pub fn read_last_log_entry<P: AsRef<Path>>(path: P) -> io::Result<Option<LogEntr
 
 pub struct LogWriter {
     file: File,
+    sequence: u64,
+    path: PathBuf,
+    max_size: u64,
+    current_size: u64,
 }
 
 impl LogWriter {
-    pub fn create<P: AsRef<Path>>(path: P) -> io::Result<LogWriter> {
-        let filename = match read_log_filenames(path.as_ref())?.first() {
-            Some((_, seq)) => format!("series.log.{:03}", seq + 1),
-            _ => "series.log.000".to_string(),
+    pub fn create<P: AsRef<Path>>(path: P, max_size: u64) -> io::Result<LogWriter> {
+        if max_size < LOG_ENTRY_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("max_size should be at least {} ({})", LOG_ENTRY_SIZE, max_size),
+            ));
+        }
+        let (filename, sequence) = match read_log_filenames(path.as_ref())?.first() {
+            Some((_, seq)) => (log_filename(seq + 1), seq + 1),
+            _ => (log_filename(0), 0),
         };
-
         Ok(LogWriter {
             file: io_utils::open_writable(path.as_ref().join(&filename))?,
+            sequence: sequence,
+            path: path.as_ref().to_path_buf(),
+            max_size: max_size,
+            current_size: 0,
         })
     }
+    fn rotate_if_needed(&mut self) -> io::Result<()> {
+        if self.current_size + LOG_ENTRY_SIZE < self.max_size {
+            return Ok(());
+        }
+        let next_sequence = self.sequence + 1;
+        self.file = io_utils::open_writable(self.path.clone().join(&log_filename(next_sequence)))?;
+        self.sequence = next_sequence;
+        self.current_size = 0;
+        Ok(())
+    }
     pub fn append(&mut self, entry: &LogEntry) -> io::Result<()> {
-        entry.write_entry(&mut self.file)
+        self.rotate_if_needed()?;
+        entry.write_entry(&mut self.file)?;
+        self.file.sync_all()?;
+        self.current_size += LOG_ENTRY_SIZE;
+        Ok(())
     }
 }
 
@@ -105,7 +139,7 @@ impl LogWriter {
 mod test {
     use super::*;
     use crate::db::test_utils::create_temp_dir;
-    use std::io::Cursor;
+    use std::io::{Cursor, SeekFrom};
 
     #[test]
     fn test_log_entry_read_write() {
@@ -151,58 +185,80 @@ mod test {
     #[test]
     fn test_writer() {
         let db_dir = create_temp_dir("test-path").unwrap();
+        let entry1 = LogEntry {
+            data_offset: 11,
+            index_offset: 22,
+            highest_ts: 33,
+        };
+        let entry2 = LogEntry {
+            data_offset: 44,
+            index_offset: 55,
+            highest_ts: 66,
+        };
+        let entry3 = LogEntry {
+            data_offset: 77,
+            index_offset: 88,
+            highest_ts: 99,
+        };
+        let entry4 = LogEntry {
+            data_offset: 111,
+            index_offset: 222,
+            highest_ts: 333,
+        };
+        let entry5 = LogEntry {
+            data_offset: 444,
+            index_offset: 555,
+            highest_ts: 666,
+        };
+        let entry6 = LogEntry {
+            data_offset: 777,
+            index_offset: 888,
+            highest_ts: 999,
+        };
         {
-            let mut writer = LogWriter::create(&db_dir.path).unwrap();
-            writer
-                .append(&LogEntry {
-                    data_offset: 11,
-                    index_offset: 22,
-                    highest_ts: 33,
-                })
-                .unwrap();
-            writer
-                .append(&LogEntry {
-                    data_offset: 44,
-                    index_offset: 55,
-                    highest_ts: 66,
-                })
-                .unwrap();
-            writer
-                .append(&LogEntry {
-                    data_offset: 44,
-                    index_offset: 55,
-                    highest_ts: 66,
-                })
-                .unwrap();
+            let mut writer = LogWriter::create(&db_dir.path, 1024).unwrap();
+            writer.append(&entry1).unwrap();
+            writer.append(&entry2).unwrap();
+            writer.append(&entry3).unwrap();
         }
 
-        assert_eq!(
-            Some(LogEntry {
-                data_offset: 44,
-                index_offset: 55,
-                highest_ts: 66,
-            }),
-            read_last_log_entry(&db_dir.path).unwrap()
-        );
+        assert_eq!(Some(entry3), read_last_log_entry(&db_dir.path).unwrap());
 
         {
-            let mut writer = LogWriter::create(&db_dir.path).unwrap();
-            writer
-                .append(&LogEntry {
-                    data_offset: 77,
-                    index_offset: 88,
-                    highest_ts: 99,
-                })
-                .unwrap();
+            let mut writer = LogWriter::create(&db_dir.path, 1024).unwrap();
+            writer.append(&entry4).unwrap();
+            writer.append(&entry5).unwrap();
+            writer.append(&entry6).unwrap();
         }
 
-        assert_eq!(
-            Some(LogEntry {
-                data_offset: 77,
-                index_offset: 88,
-                highest_ts: 99,
-            }),
-            read_last_log_entry(&db_dir.path).unwrap()
-        );
+        assert_eq!(Some(entry6), read_last_log_entry(&db_dir.path).unwrap());
+
+        {
+            let mut file = io_utils::open_writable((&db_dir.path).join(log_filename(1))).unwrap();
+            file.seek(SeekFrom::Start(LOG_ENTRY_SIZE + 1)).unwrap();
+            file.write_all(&[0, 1, 2, 3]).unwrap();
+        }
+
+        assert_eq!(Some(entry4), read_last_log_entry(&db_dir.path).unwrap());
+    }
+
+    fn gen_entry(seq: u64) -> LogEntry {
+        LogEntry {
+            data_offset: seq,
+            index_offset: 1000 + seq,
+            highest_ts: 2000 + seq,
+        }
+    }
+
+    #[test]
+    fn test_rotate() {
+        let db_dir = create_temp_dir("test-path").unwrap();
+        {
+            let mut writer = LogWriter::create(&db_dir.path, LOG_ENTRY_SIZE * 10).unwrap();
+            for i in 1..=34 {
+                writer.append(&gen_entry(i as u64)).unwrap();
+            }
+        }
+        assert_eq!(4, read_log_filenames(&db_dir.path).unwrap().len());
     }
 }
