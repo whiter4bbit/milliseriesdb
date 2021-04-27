@@ -80,10 +80,28 @@ impl FileSystem {
             base_path: base_path,
         })
     }
+
+    pub fn get_series(&self) -> io::Result<Vec<String>> {
+        let mut series = Vec::new();
+        for entry in fs::read_dir(self.base_path.join("series"))? {
+            let series_path = entry?.path().clone();
+            if series_path.join("series.dat").is_file() {
+                if let Some(filename) = series_path
+                    .file_name()
+                    .and_then(|f| f.to_owned().into_string().ok())
+                {
+                    series.push(filename);
+                }
+            }
+        }
+        series.sort();
+        Ok(series)
+    }
 }
 
 pub fn open<P: AsRef<Path>>(base_path: P) -> io::Result<FileSystem> {
-    fs::create_dir_all(base_path.as_ref())?;
+    fs::create_dir_all(base_path.as_ref().join("series"))?;
+    
     Ok(FileSystem {
         base_path: base_path.as_ref().to_owned(),
     })

@@ -61,6 +61,7 @@ impl DataWriter {
     }
     pub fn append(&mut self, block: &[&Entry], compression: Compression) -> io::Result<u64> {
         self.buffer.set_position(0);
+
         compression.write(block, &mut self.buffer)?;
 
         let block_size = self.buffer.position();
@@ -71,10 +72,13 @@ impl DataWriter {
             payload_size: block_size as usize,
         }
         .write(&mut self.file)?;
-        self.file
-            .write_all(&self.buffer.get_ref()[0..block_size as usize])?;
+
+        let payload = &self.buffer.get_ref()[0..block_size as usize];
+
+        self.file.write_all(payload)?;
 
         self.offset += block_size + BLOCK_HEADER_SIZE;
+
         Ok(self.offset)
     }
     pub fn sync(&mut self) -> io::Result<()> {

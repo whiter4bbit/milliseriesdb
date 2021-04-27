@@ -1,5 +1,5 @@
-use super::io_utils::{checksum_u64, ReadBytes, ReadError, ReadResult, WriteBytes};
 use super::file_system::{FileKind, OpenMode, SeriesDir};
+use super::io_utils::{checksum_u64, ReadBytes, ReadError, ReadResult, WriteBytes};
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::prelude::*;
@@ -14,6 +14,12 @@ pub struct LogEntry {
 
 #[allow(dead_code)]
 const LOG_ENTRY_SIZE: u64 = 8 + 8 + 8 + 8;
+
+const ZERO_ENTRY: LogEntry = LogEntry {
+    data_offset: 0,
+    index_offset: 0,
+    highest_ts: 0,
+};
 
 impl LogEntry {
     fn read_entry<R: Read>(read: &mut R) -> ReadResult<LogEntry> {
@@ -36,7 +42,11 @@ impl LogEntry {
         write.write_u64(&self.data_offset)?;
         write.write_u64(&self.index_offset)?;
         write.write_u64(&self.highest_ts)?;
-        write.write_u64(&checksum_u64(&[self.data_offset, self.index_offset, self.highest_ts]))?;
+        write.write_u64(&checksum_u64(&[
+            self.data_offset,
+            self.index_offset,
+            self.highest_ts,
+        ]))?;
         Ok(())
     }
 }
@@ -47,9 +57,7 @@ pub struct LogReader {
 
 impl LogReader {
     pub fn create(dir: SeriesDir) -> LogReader {
-        LogReader {
-            dir: dir,
-        }
+        LogReader { dir: dir }
     }
 
     fn read_last_entry(&self, seq: u64) -> io::Result<Option<LogEntry>> {
@@ -67,20 +75,16 @@ impl LogReader {
                 Ok(entry) => last = Some(entry),
             }
         }
-        Ok(last)    
+        Ok(last)
     }
 
     pub fn get_last_entry_or_default(&self) -> io::Result<LogEntry> {
         for seq in self.dir.read_log_sequences()? {
             if let Some(entry) = self.read_last_entry(seq)? {
-                return Ok(entry)
+                return Ok(entry);
             }
         }
-        Ok(LogEntry {
-            data_offset: 0,
-            index_offset: 0,
-            highest_ts: 0,
-        })
+        Ok(ZERO_ENTRY)
     }
 }
 
@@ -98,7 +102,10 @@ impl LogWriter {
         if max_size < LOG_ENTRY_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("max_size should be at least {} ({})", LOG_ENTRY_SIZE, max_size),
+                format!(
+                    "max_size should be at least {} ({})",
+                    LOG_ENTRY_SIZE, max_size
+                ),
             ));
         }
 
@@ -141,9 +148,12 @@ impl LogWriter {
 
         let next_sequence = self.sequence + 1;
 
-        self.file = self.dir.open(FileKind::Log(next_sequence), OpenMode::Write)?;
+        self.file = self
+            .dir
+            .open(FileKind::Log(next_sequence), OpenMode::Write)?;
 
         self.sequence = next_sequence;
+
         self.current_size = 0;
 
         self.sequences.push_front(next_sequence);
@@ -165,8 +175,8 @@ impl LogWriter {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use super::super::file_system;
+    use super::*;
     use crate::db::test_utils::create_temp_dir;
     use std::io::{Cursor, SeekFrom};
 
@@ -214,7 +224,7 @@ mod test {
     #[test]
     fn test_writer() {
         let db_dir = create_temp_dir("test-path").unwrap();
-        let mut fs = file_system::open(&db_dir.path).unwrap();
+        let fs = file_system::open(&db_dir.path).unwrap();
         let series_dir = fs.series("series1").unwrap();
 
         let entry1 = LogEntry {
@@ -256,9 +266,8 @@ mod test {
 
         {
             let reader = LogReader::create(series_dir.clone());
-            assert_eq!(entry3, reader.get_last_entry_or_default().unwrap());            
+            assert_eq!(entry3, reader.get_last_entry_or_default().unwrap());
         }
-        
         {
             let mut writer = LogWriter::create(series_dir.clone(), 1024).unwrap();
             writer.append(&entry4).unwrap();
@@ -268,7 +277,7 @@ mod test {
 
         {
             let reader = LogReader::create(series_dir.clone());
-            assert_eq!(entry6, reader.get_last_entry_or_default().unwrap());            
+            assert_eq!(entry6, reader.get_last_entry_or_default().unwrap());
         }
 
         {
@@ -279,7 +288,7 @@ mod test {
 
         {
             let reader = LogReader::create(series_dir.clone());
-            assert_eq!(entry4, reader.get_last_entry_or_default().unwrap());            
+            assert_eq!(entry4, reader.get_last_entry_or_default().unwrap());
         }
     }
 
@@ -294,18 +303,14 @@ mod test {
     #[test]
     fn test_rotate() {
         let db_dir = create_temp_dir("test-path").unwrap();
-        let mut fs = file_system::open(&db_dir.path).unwrap();
+        let fs = file_system::open(&db_dir.path).unwrap();
         let series_dir = fs.series("series1").unwrap();
-        
         {
             let mut writer = LogWriter::create(series_dir.clone(), LOG_ENTRY_SIZE * 10).unwrap();
             for i in 1..=34 {
                 writer.append(&gen_entry(i as u64)).unwrap();
             }
         }
-        assert_eq!(
-            vec![3, 2],
-            series_dir.read_log_sequences().unwrap()
-        );
+        assert_eq!(vec![3, 2], series_dir.read_log_sequences().unwrap());
     }
 }

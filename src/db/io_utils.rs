@@ -1,29 +1,4 @@
-use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
-
-pub fn open_readable(path: PathBuf) -> io::Result<File> {
-    OpenOptions::new().read(true).open(&path).map_err(|err| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("Can not open file: {:?}: {:?}", &path, err),
-        )
-    })
-}
-
-pub fn open_writable(path: PathBuf) -> io::Result<File> {
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(&path)
-        .map_err(|err| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Can not open file: {:?}: {:?}", &path, err),
-            )
-        })
-}
 
 pub trait WriteBytes: Write {
     fn write_u8(&mut self, v: &u8) -> io::Result<()> {

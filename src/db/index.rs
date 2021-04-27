@@ -58,8 +58,9 @@ impl IndexReader {
             return Ok(None);
         }
 
-        self.file
-            .seek(SeekFrom::Start(entry_index * INDEX_ENTRY_LENGTH + 8))?;
+        let offset = entry_index * INDEX_ENTRY_LENGTH + 8;
+
+        self.file.seek(SeekFrom::Start(offset))?;
         self.file.read_exact(&mut self.buf)?;
 
         Ok(Some(u64::from_be_bytes(self.buf)))
@@ -112,6 +113,7 @@ mod test {
                 0,
             )
             .unwrap();
+
             writer.append(1, 11).unwrap();
             writer.append(4, 44).unwrap();
             writer.append(9, 99).unwrap()
@@ -123,6 +125,7 @@ mod test {
                 offset,
             )
             .unwrap();
+
             assert_eq!(Some(11), reader.ceiling_offset(0).unwrap());
             assert_eq!(Some(11), reader.ceiling_offset(1).unwrap());
             assert_eq!(Some(44), reader.ceiling_offset(3).unwrap());
