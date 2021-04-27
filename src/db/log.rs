@@ -1,7 +1,8 @@
 use super::io_utils::{self, checksum_u64, ReadBytes, ReadError, ReadResult, WriteBytes};
-use std::fs::{read_dir, File};
-use std::io;
+use std::collections::VecDeque;
+use std::fs::{read_dir, remove_file, File};
 use std::io::prelude::*;
+use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -61,7 +62,7 @@ pub fn read_log_filenames<P: AsRef<Path>>(path: P) -> io::Result<Vec<(PathBuf, u
 }
 
 fn read_last_log_entry_of(path: PathBuf) -> io::Result<Option<LogEntry>> {
-    let mut file = io_utils::open_readable(path)?;
+    let mut file = BufReader::new(io_utils::open_readable(path)?);
     let mut last: Option<LogEntry> = None;
     loop {
         match LogEntry::read_entry(&mut file) {
@@ -94,6 +95,7 @@ pub struct LogWriter {
     path: PathBuf,
     max_size: u64,
     current_size: u64,
+    log_paths: VecDeque<(PathBuf, u64)>,
 }
 
 impl LogWriter {
@@ -104,32 +106,61 @@ impl LogWriter {
                 format!("max_size should be at least {} ({})", LOG_ENTRY_SIZE, max_size),
             ));
         }
-        let (filename, sequence) = match read_log_filenames(path.as_ref())?.first() {
-            Some((_, seq)) => (log_filename(seq + 1), seq + 1),
-            _ => (log_filename(0), 0),
+
+        let mut log_paths: VecDeque<(PathBuf, u64)> = read_log_filenames(path.as_ref())?.into_iter().collect();
+
+        let (current_log_path, sequence) = match log_paths.front() {
+            Some((_, seq)) => (path.as_ref().join(log_filename(seq + 1)), seq + 1),
+            _ => (path.as_ref().join(log_filename(0)), 0),
         };
-        Ok(LogWriter {
-            file: io_utils::open_writable(path.as_ref().join(&filename))?,
+        log_paths.push_front((current_log_path.clone(), sequence));
+
+        let mut writer = LogWriter {
+            file: io_utils::open_writable(current_log_path.clone())?,
             sequence: sequence,
             path: path.as_ref().to_path_buf(),
             max_size: max_size,
             current_size: 0,
-        })
+            log_paths: log_paths,
+        };
+
+        writer.cleanup()?;
+
+        Ok(writer)
+    }
+    fn cleanup(&mut self) -> io::Result<()> {
+        while self.log_paths.len() > 2 {
+            if let Some((path, _)) = self.log_paths.pop_back() {
+                remove_file(path.clone())?;
+                log::debug!("Removed {:?}", path.clone());
+            }
+        }
+        Ok(())
     }
     fn rotate_if_needed(&mut self) -> io::Result<()> {
         if self.current_size + LOG_ENTRY_SIZE < self.max_size {
             return Ok(());
         }
+
         self.file.sync_data()?;
+
         let next_sequence = self.sequence + 1;
-        self.file = io_utils::open_writable(self.path.clone().join(&log_filename(next_sequence)))?;
+        let next_log_path = self.path.clone().join(&log_filename(next_sequence));
+
+        self.file = io_utils::open_writable(next_log_path.clone())?;
+
         self.sequence = next_sequence;
         self.current_size = 0;
-        Ok(())
+
+        self.log_paths.push_front((next_log_path.clone(), self.sequence));
+
+        self.cleanup()
     }
     pub fn append(&mut self, entry: &LogEntry) -> io::Result<()> {
         self.rotate_if_needed()?;
+
         entry.write_entry(&mut self.file)?;
+
         self.current_size += LOG_ENTRY_SIZE;
         Ok(())
     }
@@ -262,6 +293,12 @@ mod test {
                 writer.append(&gen_entry(i as u64)).unwrap();
             }
         }
-        assert_eq!(4, read_log_filenames(&db_dir.path).unwrap().len());
+        assert_eq!(
+            vec![
+                ((&db_dir.path.join("series.log.3")).to_path_buf(), 3),
+                ((&db_dir.path.join("series.log.2")).to_path_buf(), 2),
+            ],
+            read_log_filenames(&db_dir.path).unwrap()
+        );
     }
 }
