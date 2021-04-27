@@ -1,5 +1,5 @@
-use crate::db::io_utils::{ReadBytes, WriteBytes};
-use crate::db::Entry;
+use super::io_utils::{ReadBytes, WriteBytes};
+use super::Entry;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use flate2::Compression as DeflateCompression;

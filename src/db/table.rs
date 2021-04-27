@@ -3,10 +3,10 @@ use std::fs::create_dir_all;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::db::data::{DataReader, DataWriter};
-use crate::db::entry::Entry;
-use crate::db::index::{IndexReader, IndexWriter};
-use crate::db::log::{self, LogEntry, LogWriter};
+use super::data::{DataReader, DataWriter};
+use super::entry::Entry;
+use super::index::{IndexReader, IndexWriter};
+use super::log::{self, LogEntry, LogWriter};
 
 pub enum SyncMode {
     #[allow(dead_code)]

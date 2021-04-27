@@ -9,7 +9,7 @@ fn append(db_path: &str, input_csv: &str) -> io::Result<()> {
     let mut db = DB::open_or_create(db_path, SyncMode::Every(1000))?;
     let reader = BufReader::new(File::open(input_csv)?);
     let mut buffer = Vec::new();
-    let batch_size = 100;    
+    let batch_size = 100;
     for entry in reader.lines() {
         let entry = entry?;
         let mut tokens = entry.split(';');

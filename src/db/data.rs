@@ -4,9 +4,9 @@ use std::io::SeekFrom;
 use std::io::{self, Cursor};
 use std::path::Path;
 
-use crate::db::compression::Compression;
-use crate::db::entry::Entry;
-use crate::db::io_utils::{self, ReadBytes, WriteBytes};
+use super::compression::Compression;
+use super::entry::Entry;
+use super::io_utils::{self, ReadBytes, WriteBytes};
 
 const BLOCK_HEADER_SIZE: u64 = 4 + 1 + 4;
 
