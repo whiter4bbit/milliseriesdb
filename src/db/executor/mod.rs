@@ -3,9 +3,10 @@ mod query_expr;
 
 use super::utils::IntoEntriesIterator;
 use super::Entry;
-use agg::{Aggregator, AggregatorState};
-pub use query_expr::QueryExpr;
 pub use agg::Aggregation;
+pub use query_expr::QueryExpr;
+
+use agg::{Aggregator, AggregatorState};
 use serde_derive::{Deserialize, Serialize};
 use std::io;
 use std::time::SystemTime;
@@ -58,7 +59,6 @@ impl Executor {
         I: IntoEntriesIterator,
     {
         let start_ts = SystemTime::now();
-        
         let mut rows = Vec::new();
         let mut scanned = 0usize;
         for entry in series.into_iter(self.from)? {
@@ -95,6 +95,20 @@ impl Executor {
     }
 }
 
+pub fn execute_query<I>(query: &Query, into_iter: I) -> io::Result<Vec<Row>>
+where
+    I: IntoEntriesIterator,
+{
+    Ok(Executor::new(query).execute(into_iter)?)
+}
+
+pub async fn execute_query_async<I>(query: Query, into_iter: I) -> io::Result<Vec<Row>>
+where
+    I: IntoEntriesIterator + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || execute_query(&query, into_iter)).await.unwrap()
+}
+
 #[cfg(test)]
 mod test {
     use super::agg::Aggregator;
@@ -128,14 +142,14 @@ mod test {
         assert_eq!(
             true,
             match result[0].values[0] {
-                Aggregation::Mean(value) => (value - 3.0).abs() <= 10e-6
+                Aggregation::Mean(value) => (value - 3.0).abs() <= 10e-6,
             }
         );
 
         assert_eq!(
             true,
             match result[1].values[0] {
-                Aggregation::Mean(value) => (value - 5.0).abs() <= 10e-6
+                Aggregation::Mean(value) => (value - 5.0).abs() <= 10e-6,
             }
         )
     }
