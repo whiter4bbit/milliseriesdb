@@ -1,4 +1,4 @@
-use clap::{App, AppSettings, Arg, SubCommand};
+use clap::clap_app;
 use milliseriesdb::db::{SyncMode, DB};
 
 mod append;
@@ -7,69 +7,25 @@ mod server;
 
 #[tokio::main]
 async fn main() {
-    let matches = App::new("milliseriesdb")
-        .setting(AppSettings::SubcommandRequiredElseHelp)
-        .arg(
-            Arg::with_name("path")
-                .short("p")
-                .required(true)
-                .takes_value(true)
-                .help("path to database"),
+    let matches = clap_app!(milliseriesdb =>
+        (@setting SubcommandRequiredElseHelp)
+        (@arg path: -p <PATH> --path "path to database")
+        (@subcommand append => 
+            (about: "appends entries to the series")
+            (@arg series: -s <SERIES> --series "id of the series")
+            (@arg csv: -c <CSV> --csv "path to csv (timestamp; value)")
         )
-        .subcommand(
-            SubCommand::with_name("append")
-                .about("appends entries to the series")
-                .arg(
-                    Arg::with_name("series")
-                        .short("s")
-                        .required(true)
-                        .takes_value(true)
-                        .help("id of the series"),
-                )
-                .arg(
-                    Arg::with_name("csv")
-                        .short("c")
-                        .required(true)
-                        .takes_value(true)
-                        .help("path to csv (timestamp; value)"),
-                ),
+        (@subcommand export => 
+            (about: "export entries from the series")
+            (@arg series: -s <SERIES> --series "id of the series")
+            (@arg csv: -c <CSV> --csv "path to destination csv (timestamp; value)")
+            (@arg from: -f <FROM> --from "start timestamp")
         )
-        .subcommand(
-            SubCommand::with_name("export")
-                .about("export entries from series")
-                .arg(
-                    Arg::with_name("series")
-                        .short("s")
-                        .required(true)
-                        .takes_value(true)
-                        .help("id of the series"),
-                )
-                .arg(
-                    Arg::with_name("csv")
-                        .short("c")
-                        .required(true)
-                        .takes_value(true)
-                        .help("export destination"),
-                )
-                .arg(
-                    Arg::with_name("from")
-                        .short("f")
-                        .required(true)
-                        .takes_value(true)
-                        .default_value("0")
-                        .help("from timestamp"),
-                ),
+        (@subcommand server => 
+            (about: "start the server")
+            (@arg addr: -a <ADDR> --addr "listen address, like 0.0.0.0:8080")
         )
-        .subcommand(
-            SubCommand::with_name("server").about("start rest server").arg(
-                Arg::with_name("addr")
-                    .short("a")
-                    .required(true)
-                    .takes_value(true)
-                    .help("listen address '127.0.0.1:8080'"),
-            ),
-        )
-        .get_matches();
+    ).get_matches();
 
     let mut db = DB::open(matches.value_of("path").unwrap(), SyncMode::Every(100)).unwrap();
 
