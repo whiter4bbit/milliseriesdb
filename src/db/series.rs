@@ -8,6 +8,7 @@ use super::entry::Entry;
 use super::index::{IndexReader, IndexWriter};
 use super::log::{self, LogEntry, LogWriter};
 
+#[derive(Copy, Clone)]
 pub enum SyncMode {
     #[allow(dead_code)]
     Paranoid,
@@ -17,7 +18,7 @@ pub enum SyncMode {
     Every(u16),
 }
 
-pub struct TableWriter {
+pub struct SeriesWriter {
     data_writer: DataWriter,
     index_writer: IndexWriter,
     log_writer: LogWriter,
@@ -26,9 +27,9 @@ pub struct TableWriter {
     writes: u64,
 }
 
-impl TableWriter {
+impl SeriesWriter {
     #[allow(dead_code)]
-    pub fn create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<TableWriter> {
+    pub fn create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<SeriesWriter> {
         create_dir_all(path.as_ref())?;
         let last_entry = match log::read_last_log_entry(path.as_ref())? {
             Some(entry) => entry,
@@ -41,7 +42,7 @@ impl TableWriter {
         let mut log_writer = LogWriter::create(path.as_ref(), 1024 * 1024)?;
         log_writer.append(&last_entry)?;
         log_writer.sync()?;
-        Ok(TableWriter {
+        Ok(SeriesWriter {
             data_writer: DataWriter::create(path.as_ref(), last_entry.data_offset)?,
             index_writer: IndexWriter::open(path.as_ref(), last_entry.index_offset)?,
             log_writer: log_writer,
@@ -55,7 +56,7 @@ impl TableWriter {
         let should_sync = match self.sync_mode {
             SyncMode::Paranoid => true,
             SyncMode::Every(p) if p > 0 && self.writes % p as u64 == 0 => true,
-            _ => false
+            _ => false,
         };
         if should_sync {
             self.data_writer.sync()?;
@@ -86,15 +87,15 @@ impl TableWriter {
     }
 }
 
-pub struct TableReader {
+pub struct SeriesReader {
     index_reader: IndexReader,
     log_entry: LogEntry,
     path: PathBuf,
 }
 
-impl TableReader {
+impl SeriesReader {
     #[allow(dead_code)]
-    pub fn create<P: AsRef<Path>>(path: P) -> io::Result<TableReader> {
+    pub fn create<P: AsRef<Path>>(path: P) -> io::Result<SeriesReader> {
         create_dir_all(path.as_ref())?;
         let last_entry = match log::read_last_log_entry(path.as_ref())? {
             Some(entry) => entry,
@@ -104,7 +105,7 @@ impl TableReader {
                 highest_ts: 0,
             },
         };
-        Ok(TableReader {
+        Ok(SeriesReader {
             index_reader: IndexReader::create(path.as_ref(), last_entry.index_offset)?,
             log_entry: last_entry,
             path: path.as_ref().to_path_buf(),
@@ -112,13 +113,13 @@ impl TableReader {
     }
 
     #[allow(dead_code)]
-    pub fn iterator(&mut self, from_ts: u64) -> io::Result<TableIterator> {
+    pub fn iterator(&mut self, from_ts: u64) -> io::Result<SeriesIterator> {
         let data_size = self.log_entry.data_offset;
         let start_offset = match self.index_reader.ceiling_offset(from_ts)? {
             Some(offset) => offset,
             _ => data_size,
         };
-        Ok(TableIterator {
+        Ok(SeriesIterator {
             data_reader: DataReader::create(self.path.clone(), data_size)?,
             offset: start_offset,
             size: data_size,
@@ -128,7 +129,7 @@ impl TableReader {
     }
 }
 
-pub struct TableIterator {
+pub struct SeriesIterator {
     data_reader: DataReader,
     offset: u64,
     size: u64,
@@ -136,7 +137,7 @@ pub struct TableIterator {
     buffer: VecDeque<Entry>,
 }
 
-impl TableIterator {
+impl SeriesIterator {
     fn fetch_block(&mut self) -> io::Result<()> {
         if self.offset < self.size {
             let mut block = Vec::new();
@@ -152,13 +153,13 @@ impl TableIterator {
     }
 }
 
-impl Iterator for TableIterator {
+impl Iterator for SeriesIterator {
     type Item = io::Result<Entry>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.buffer.is_empty() {
             if let Err(error) = self.fetch_block() {
-                return Some(Err(error))
+                return Some(Err(error));
             }
         }
 
@@ -169,13 +170,38 @@ impl Iterator for TableIterator {
     }
 }
 
+#[allow(dead_code)]
+pub struct Series {
+    writer: SeriesWriter,
+    path: PathBuf,
+}
+
+impl Series {
+    #[allow(dead_code)]
+    pub fn open_or_create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<Series> {
+        Ok(Series {
+            writer: SeriesWriter::create(path.as_ref(), sync_mode)?,
+            path: path.as_ref().to_path_buf(),
+        })
+    }
+    #[allow(dead_code)]
+    pub fn append(&mut self, batch: &[Entry]) -> io::Result<()> {
+        self.writer.append_batch(batch)
+    }
+    #[allow(dead_code)]
+    pub fn iterator(&mut self, from_ts: u64) -> io::Result<SeriesIterator> {
+        let mut reader = SeriesReader::create(&self.path)?;
+        reader.iterator(from_ts)
+    }
+}
+
 #[cfg(test)]
-mod table_test {
+mod test {
     use super::*;
     use crate::db::test_utils::create_temp_dir;
 
     #[test]
-    fn test_table_read_write() {
+    fn test_series_read_write() {
         let db_dir = create_temp_dir("test-base").unwrap();
 
         let entries = [
@@ -194,13 +220,13 @@ mod table_test {
             Entry { ts: 140, value: 1140.0 },
         ];
         {
-            let mut writer = TableWriter::create(&db_dir.path, SyncMode::Never).unwrap();
+            let mut writer = SeriesWriter::create(&db_dir.path, SyncMode::Never).unwrap();
             writer.append_batch(&entries[0..5]).unwrap();
             writer.append_batch(&entries[5..8]).unwrap();
             writer.append_batch(&entries[8..11]).unwrap();
         }
 
-        let mut snapshot_1 = TableReader::create(&db_dir.path).unwrap();
+        let mut snapshot_1 = SeriesReader::create(&db_dir.path).unwrap();
         assert_eq!(
             entries[3..11].to_vec(),
             snapshot_1.iterator(4).unwrap().map(|e| e.unwrap()).collect::<Vec<Entry>>()
@@ -215,11 +241,11 @@ mod table_test {
         );
 
         {
-            let mut writer = TableWriter::create(&db_dir.path, SyncMode::Never).unwrap();
+            let mut writer = SeriesWriter::create(&db_dir.path, SyncMode::Never).unwrap();
             writer.append_batch(&entries[11..13]).unwrap();
         }
 
-        let mut snapshot_2 = TableReader::create(&db_dir.path).unwrap();
+        let mut snapshot_2 = SeriesReader::create(&db_dir.path).unwrap();
         assert_eq!(
             entries[1..13].to_vec(),
             snapshot_2.iterator(2).unwrap().map(|e| e.unwrap()).collect::<Vec<Entry>>()
