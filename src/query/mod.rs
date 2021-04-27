@@ -60,7 +60,10 @@ where
             .map(|aggregator| aggregator.default_state())
             .collect();
         let mut is_empty = true;
-        for entry in self.into_iterator.into_iter(self.statement.from)? {
+        for entry in self
+            .into_iterator
+            .into_iter(self.statement.from)?
+        {
             scanned += 1;
             let entry = entry?;
             let entry_group_ts = as_group_ts(entry.ts, self.statement.group_by);

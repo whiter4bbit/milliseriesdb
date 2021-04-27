@@ -1,10 +1,13 @@
-use super::file_system::{FileKind, OpenMode, SeriesDir};
-use super::io_utils::{checksum_u64, ReadBytes, ReadError, ReadResult, WriteBytes};
+use crc::crc32::{self, Hasher32};
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, BufReader};
 use std::sync::Arc;
+use std::hash::Hasher;
+
+use super::file_system::{FileKind, OpenMode, SeriesDir};
+use super::io_utils::{ReadBytes, WriteBytes};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct LogEntry {
@@ -14,7 +17,7 @@ pub struct LogEntry {
 }
 
 #[allow(dead_code)]
-const LOG_ENTRY_SIZE: u64 = 8 + 8 + 8 + 8;
+const LOG_ENTRY_SIZE: u64 = 8 + 8 + 8 + 4;
 
 const ZERO_ENTRY: LogEntry = LogEntry {
     data_offset: 0,
@@ -22,13 +25,21 @@ const ZERO_ENTRY: LogEntry = LogEntry {
     highest_ts: 0,
 };
 
+fn entry_checksum(data_offset: u64, index_offset: u64, highest_ts: u64) -> u32 {
+    let mut digest = crc32::Digest::new(crc32::IEEE);
+    digest.write_u64(data_offset);
+    digest.write_u64(index_offset);
+    digest.write_u64(highest_ts);
+    digest.sum32()
+}
+
 impl LogEntry {
-    fn read_entry<R: Read>(read: &mut R) -> ReadResult<LogEntry> {
-        let data_offset = read.read_u64().map_err(ReadError::Other)?;
-        let index_offset = read.read_u64().map_err(ReadError::Other)?;
-        let highest_ts = read.read_u64().map_err(ReadError::Other)?;
-        let target_checksum = read.read_u64().map_err(ReadError::Other)?;
-        let actual_checksum = checksum_u64(&[data_offset, index_offset, highest_ts]);
+    fn read_entry<R: Read>(read: &mut R) -> io::Result<LogEntry> {
+        let data_offset = read.read_u64()?;
+        let index_offset = read.read_u64()?;
+        let highest_ts = read.read_u64()?;
+        let target_checksum = read.read_u32()?;
+        let actual_checksum = entry_checksum(data_offset, index_offset, highest_ts);
 
         match target_checksum == actual_checksum {
             true => Ok(LogEntry {
@@ -36,18 +47,18 @@ impl LogEntry {
                 index_offset,
                 highest_ts,
             }),
-            _ => Err(ReadError::CorruptedBlock),
+            _ => Err(io::Error::new(io::ErrorKind::InvalidData, "crc32 mismatch")),
         }
     }
     fn write_entry<W: Write>(&self, write: &mut W) -> io::Result<()> {
         write.write_u64(&self.data_offset)?;
         write.write_u64(&self.index_offset)?;
         write.write_u64(&self.highest_ts)?;
-        write.write_u64(&checksum_u64(&[
+        write.write_u32(&entry_checksum(
             self.data_offset,
             self.index_offset,
             self.highest_ts,
-        ]))?;
+        ))?;
         Ok(())
     }
 }
@@ -66,12 +77,10 @@ impl LogReader {
         let mut last: Option<LogEntry> = None;
         loop {
             match LogEntry::read_entry(&mut file) {
-                Err(error) => match error {
-                    ReadError::Other(other) => match other.kind() {
-                        io::ErrorKind::UnexpectedEof => break,
-                        _ => return Err(other),
-                    },
-                    ReadError::CorruptedBlock => break,
+                Err(error) => match error.kind() {
+                    io::ErrorKind::UnexpectedEof => break,
+                    io::ErrorKind::InvalidData => break,
+                    _ => return Err(error),
                 },
                 Ok(entry) => last = Some(entry),
             }
@@ -203,7 +212,10 @@ mod test {
         assert_eq!(
             true,
             match LogEntry::read_entry(&mut cursor) {
-                Err(ReadError::CorruptedBlock) => true,
+                Err(error) => match error.kind() {
+                    io::ErrorKind::InvalidData => true,
+                    _ => false,
+                },
                 _ => false,
             }
         );
@@ -216,7 +228,10 @@ mod test {
         assert_eq!(
             true,
             match LogEntry::read_entry(&mut cursor) {
-                Err(ReadError::CorruptedBlock) => true,
+                Err(error) => match error.kind() {
+                    io::ErrorKind::InvalidData => true,
+                    _ => false,
+                },
                 _ => false,
             }
         );

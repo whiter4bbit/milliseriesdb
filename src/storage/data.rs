@@ -1,4 +1,6 @@
+use crc::crc32::{self, Hasher32};
 use std::fs::File;
+use std::hash::Hasher;
 use std::io::prelude::*;
 use std::io::{self, BufReader, Cursor, SeekFrom};
 
@@ -6,7 +8,7 @@ use super::compression::Compression;
 use super::entry::Entry;
 use super::io_utils::{ReadBytes, WriteBytes};
 
-const BLOCK_HEADER_SIZE: u64 = 4 + 1 + 4;
+const BLOCK_HEADER_SIZE: u64 = 4 + 1 + 4 + 4;
 
 struct BlockHeader {
     entries_count: usize,
@@ -14,19 +16,36 @@ struct BlockHeader {
     payload_size: usize,
 }
 
+fn header_checksum(entries_count: usize, compression: &Compression, payload_size: usize) -> u32 {
+    let mut digest = crc32::Digest::new(crc32::IEEE);
+    digest.write_usize(entries_count);
+    digest.write_u8(compression.marker());
+    digest.write_usize(payload_size);
+    digest.sum32()
+}
+
 impl BlockHeader {
     fn read<R: Read>(file: &mut R) -> io::Result<BlockHeader> {
         let entries_count = file.read_u32()? as usize;
-        let compression = match Compression::from_marker(file.read_u8()?) {
+        let compr_marker = file.read_u8()?;
+        let compression = match Compression::from_marker(compr_marker) {
             Some(compression) => compression,
             None => {
                 return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Unknown compression format",
+                    io::ErrorKind::InvalidData,
+                    format!("Unknown compression format: {}", compr_marker),
                 ))
             }
         };
         let payload_size = file.read_u32()? as usize;
+        let target_checksum = file.read_u32()?;
+        
+        let checksum = header_checksum(entries_count, &compression, payload_size);
+
+        if target_checksum != checksum {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "crc32 mismatch"));
+        }
+
         Ok(BlockHeader {
             entries_count,
             compression,
@@ -37,6 +56,9 @@ impl BlockHeader {
         file.write_u32(&(self.entries_count as u32))?;
         file.write_u8(&(self.compression.marker()))?;
         file.write_u32(&(self.payload_size as u32))?;
+
+        let checksum = header_checksum(self.entries_count, &self.compression, self.payload_size);
+        file.write_u32(&checksum)?;
         Ok(())
     }
 }
@@ -121,7 +143,6 @@ mod test {
     use super::super::file_system::{self, FileKind, OpenMode};
     use super::super::test_utils::create_temp_dir;
     use super::*;
-        
     #[test]
     fn test_read_write() {
         let db_dir = create_temp_dir("test-path").unwrap();
