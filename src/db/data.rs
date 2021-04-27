@@ -67,8 +67,8 @@ impl DataWriter {
             entries_count: block.len(),
             compression: self.compression.clone(),
             payload_size: block_size as usize,
-        }.write(&mut self.file)?;
-        
+        }
+        .write(&mut self.file)?;
         self.file.write_all(&self.buffer.get_ref()[0..block_size as usize])?;
 
         self.offset += block_size + BLOCK_HEADER_SIZE;
@@ -82,31 +82,31 @@ impl DataWriter {
 pub struct DataReader {
     file: File,
     buffer: Vec<u8>,
+    offset: u64,
 }
 
 impl DataReader {
-    pub fn create<P: AsRef<Path>>(path: P, _: u64) -> io::Result<DataReader> {
+    pub fn create<P: AsRef<Path>>(path: P, start_offset: u64, _: u64) -> io::Result<DataReader> {
+        let mut file = io_utils::open_readable(path.as_ref().join("series.dat"))?;
+        file.seek(SeekFrom::Start(start_offset))?;
         Ok(DataReader {
-            file: io_utils::open_readable(path.as_ref().join("series.dat"))?,
+            file: file,
             buffer: Vec::new(),
+            offset: start_offset,
         })
     }
-    pub fn read_block(&mut self, offset: u64, destination: &mut Vec<Entry>) -> io::Result<u64> {
-        self.file.seek(SeekFrom::Start(offset))?;
-        
+    pub fn read_block(&mut self, destination: &mut Vec<Entry>) -> io::Result<u64> {
         let header = BlockHeader::read(&mut self.file)?;
-
         while self.buffer.len() < header.payload_size {
             self.buffer.push(0u8);
         }
-
         self.file.read_exact(&mut self.buffer[0..header.payload_size])?;
-        
         let mut reader = Cursor::new(&self.buffer);
         for entry in header.compression.read(&mut reader, header.entries_count)? {
             destination.push(entry);
         }
-        Ok(offset + header.payload_size as u64 + BLOCK_HEADER_SIZE)
+        self.offset += header.payload_size as u64 + BLOCK_HEADER_SIZE;
+        Ok(self.offset)
     }
 }
 
@@ -132,15 +132,15 @@ mod test {
         let offset_block2 = writer.append(&entries[3..5].iter().collect::<Vec<&Entry>>()).unwrap();
 
         {
-            let mut reader = DataReader::create(&db_dir.path, offset_block2).unwrap();
+            let mut reader = DataReader::create(&db_dir.path, 0, offset_block2).unwrap();
             let mut result: Vec<Entry> = Vec::new();
 
-            reader.read_block(offset_block0, &mut result).unwrap();
+            reader.read_block(&mut result).unwrap();
             assert_eq!(entries[0..3].to_owned(), result);
 
             result.clear();
 
-            reader.read_block(offset_block1, &mut result).unwrap();
+            reader.read_block(&mut result).unwrap();
             assert_eq!(entries[3..5].to_owned(), result);
         }
     }

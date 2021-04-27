@@ -1,12 +1,12 @@
 mod agg;
 mod query;
 
-use serde_derive::{Deserialize, Serialize};
 use super::utils::IntoEntriesIterator;
+use super::Entry;
 use agg::{Aggregation, AggregatorState};
 pub use query::{Query, QueryExpression};
+use serde_derive::{Deserialize, Serialize};
 use std::io;
-use super::Entry;
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Serialize)]
@@ -47,7 +47,9 @@ impl Executor {
         I: IntoEntriesIterator,
     {
         let mut rows = Vec::new();
+        let mut scanned = 0usize;
         for entry in series.into_iter(self.from)? {
+            scanned += 1;
             let entry = entry?;
             let entry_group_ts = self.as_group_ts(entry.ts);
             if entry_group_ts == self.group_ts || self.is_empty {
@@ -75,14 +77,15 @@ impl Executor {
                 values: self.state.iter_mut().map(|state| state.pop()).collect(),
             })
         }
+        println!("Scanned {} entries", scanned);
         Ok(rows)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use super::agg::Aggregator;
+    use super::*;
 
     #[test]
     fn test_execute() {

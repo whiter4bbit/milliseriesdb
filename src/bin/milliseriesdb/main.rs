@@ -7,6 +7,8 @@ mod server;
 
 #[tokio::main]
 async fn main() {
+    stderrlog::new().module(module_path!()).init().unwrap();
+
     let matches = clap_app!(milliseriesdb =>
         (@setting SubcommandRequiredElseHelp)
         (@arg path: -p <PATH> --path "path to database")
