@@ -1,5 +1,6 @@
 use clap::clap_app;
-use milliseriesdb::db::{Compression, SyncMode, DB};
+use milliseriesdb::db::{file_system, series_table, Compression, SyncMode};
+use std::sync::Arc;
 
 mod append;
 mod export;
@@ -7,7 +8,11 @@ mod server;
 
 #[tokio::main]
 async fn main() {
-    stderrlog::new().module(module_path!()).verbosity(4).init().unwrap();
+    stderrlog::new()
+        .module(module_path!())
+        .verbosity(4)
+        .init()
+        .unwrap();
 
     let matches = clap_app!(milliseriesdb =>
         (@setting SubcommandRequiredElseHelp)
@@ -32,18 +37,19 @@ async fn main() {
     )
     .get_matches();
 
-    let mut db = DB::open(
-        matches.value_of("path").unwrap(),
-        SyncMode::Every(100),
-    )
-    .unwrap();
+    let fs = file_system::open(matches.value_of("path").unwrap()).unwrap();
+
+    let series_table = series_table::create(fs, SyncMode::Every(100)).unwrap();
 
     match matches.subcommand() {
         ("append", Some(sub_match)) => append::append(
-            &mut db,
+            series_table,
             sub_match.value_of("series").unwrap(),
             sub_match.value_of("csv").unwrap(),
-            sub_match.value_of("batch_size").and_then(|from| from.parse::<usize>().ok()).unwrap(),
+            sub_match
+                .value_of("batch_size")
+                .and_then(|from| from.parse::<usize>().ok())
+                .unwrap(),
             match sub_match.value_of("compression").unwrap() {
                 "deflate" => Compression::Deflate,
                 "delta" => Compression::Delta,
@@ -53,16 +59,22 @@ async fn main() {
         .unwrap(),
         ("export", Some(sub_match)) => {
             export::export(
-                &mut db,
+                series_table,
                 sub_match.value_of("series").unwrap(),
                 sub_match.value_of("csv").unwrap(),
-                sub_match.value_of("from").and_then(|from| from.parse::<u64>().ok()).unwrap(),
+                sub_match
+                    .value_of("from")
+                    .and_then(|from| from.parse::<u64>().ok())
+                    .unwrap(),
             )
             .unwrap();
         }
-        ("server", Some(sub_match)) => server::start_server(db, sub_match.value_of("addr").unwrap().parse().unwrap())
-            .await
-            .unwrap(),
+        ("server", Some(sub_match)) => server::start_server(
+            Arc::new(series_table),
+            sub_match.value_of("addr").unwrap().parse().unwrap(),
+        )
+        .await
+        .unwrap(),
         _ => unreachable!(),
     }
 }

@@ -4,18 +4,18 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, Mutex};
 
-struct SeriesEntry {
+struct TableEntry {
     writer: Arc<SeriesWriterGuard>,
     reader: Arc<SeriesReader>,
 }
 
-impl SeriesEntry {
+impl TableEntry {
     pub fn open_or_create<S: AsRef<str>>(
         fs: &FileSystem,
         name: S,
         sync_mode: SyncMode,
-    ) -> io::Result<SeriesEntry> {
-        Ok(SeriesEntry {
+    ) -> io::Result<TableEntry> {
+        Ok(TableEntry {
             writer: Arc::new(SeriesWriterGuard::create(
                 fs.series(name.as_ref())?,
                 sync_mode,
@@ -28,7 +28,7 @@ impl SeriesEntry {
 pub struct SeriesTable {
     fs: FileSystem,
     sync_mode: SyncMode,
-    entries: Arc<Mutex<HashMap<String, Arc<SeriesEntry>>>>,
+    entries: Arc<Mutex<HashMap<String, Arc<TableEntry>>>>,
 }
 
 impl SeriesTable {
@@ -46,7 +46,7 @@ impl SeriesTable {
             return Ok(());
         }
 
-        let entry = SeriesEntry::open_or_create(&self.fs, &name, self.sync_mode)?;
+        let entry = TableEntry::open_or_create(&self.fs, &name, self.sync_mode)?;
         entries.insert(name.as_ref().to_owned(), Arc::new(entry));
 
         Ok(())
@@ -58,7 +58,7 @@ pub fn create(fs: FileSystem, sync_mode: SyncMode) -> io::Result<SeriesTable> {
     for name in fs.get_series()? {
         entries.insert(
             name.to_owned(),
-            Arc::new(SeriesEntry::open_or_create(&fs, &name, sync_mode)?),
+            Arc::new(TableEntry::open_or_create(&fs, &name, sync_mode)?),
         );
     }
 

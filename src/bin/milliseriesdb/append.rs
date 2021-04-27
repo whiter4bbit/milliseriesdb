@@ -1,5 +1,5 @@
 use flate2::read::GzDecoder;
-use milliseriesdb::db::{Entry, DB, Compression};
+use milliseriesdb::db::{Compression, Entry, SeriesTable};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::str::FromStr;
@@ -20,15 +20,21 @@ impl FromStr for CsvEntry {
     }
 }
 
-pub fn append(db: &mut DB, series_id: &str, input_csv: &str, batch_size: usize, compression: Compression) -> io::Result<()> {
+pub fn append(
+    series_table: SeriesTable,
+    series_id: &str,
+    input_csv: &str,
+    batch_size: usize,
+    compression: Compression,
+) -> io::Result<()> {
     let reader: Box<dyn BufRead> = if input_csv.ends_with(".gz") {
         Box::new(BufReader::new(GzDecoder::new(File::open(input_csv)?)?))
     } else {
         Box::new(BufReader::new(File::open(input_csv)?))
     };
 
-    db.create_series(series_id)?;
-    let writer = db.writer(series_id).unwrap();
+    series_table.create(series_id)?;
+    let writer = series_table.writer(series_id).unwrap();
     let mut buffer = Vec::new();
     for entry in reader.lines() {
         let CsvEntry(ts, val) = entry?.parse::<CsvEntry>()?;
