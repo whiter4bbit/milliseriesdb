@@ -40,6 +40,7 @@ impl TableWriter {
         };
         let mut log_writer = LogWriter::create(path.as_ref(), 1024 * 1024)?;
         log_writer.append(&last_entry)?;
+        log_writer.sync()?;
         Ok(TableWriter {
             data_writer: DataWriter::create(path.as_ref(), last_entry.data_offset)?,
             index_writer: IndexWriter::open(path.as_ref(), last_entry.index_offset)?,
