@@ -3,11 +3,11 @@ mod statement;
 mod statement_expr;
 
 use crate::storage::IntoEntriesIterator;
+pub use aggregation::Aggregation;
 use aggregation::AggregatorState;
 use serde_derive::{Deserialize, Serialize};
-pub use statement_expr::StatementExpr;
 pub use statement::Statement;
-pub use aggregation::Aggregation;
+pub use statement_expr::StatementExpr;
 use std::io;
 use std::time::SystemTime;
 
@@ -98,6 +98,17 @@ where
     }
 }
 
+impl<I> Query<I>
+where
+    I: IntoEntriesIterator + Send + 'static,
+{
+    pub async fn rows_async(self) -> io::Result<Vec<Row>> {
+        tokio::task::spawn_blocking(move || self.rows())
+            .await
+            .unwrap()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::super::storage::Entry;
@@ -106,13 +117,6 @@ mod test {
 
     #[test]
     fn test_query() {
-        let mut statement = Statement {
-            from: 0,
-            group_by: 10,
-            aggregators: vec![Aggregator::Mean],
-            limit: 100,
-        };
-
         let series = vec![
             Entry { ts: 0, value: 1.0 },
             Entry { ts: 1, value: 4.0 },
@@ -123,7 +127,15 @@ mod test {
             Entry { ts: 16, value: 2.0 },
         ];
 
-        let result = series.query(statement).rows().unwrap();
+        let result = series
+            .query(Statement {
+                from: 0,
+                group_by: 10,
+                aggregators: vec![Aggregator::Mean],
+                limit: 100,
+            })
+            .rows()
+            .unwrap();
 
         assert_eq!(2, result.len());
         assert_eq!(0, result[0].ts);

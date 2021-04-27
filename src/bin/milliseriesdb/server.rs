@@ -80,7 +80,7 @@ mod restapi {
     ) -> Result<Box<dyn warp::Reply>, Infallible> {
         Ok(match series_table.reader(id) {
             Some(reader) => match Statement::try_from(statement_expr) {
-                Ok(statement) => match reader.query(statement).rows() {
+                Ok(statement) => match reader.query(statement).rows_async().await {
                     Ok(rows) => Box::new(warp::reply::json(&JsonRows::from_rows(rows))),
                     _ => Box::new(StatusCode::INTERNAL_SERVER_ERROR),
                 },
