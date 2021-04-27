@@ -1,14 +1,12 @@
 use std::collections::VecDeque;
-use std::fs::create_dir_all;
 use std::io;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use super::data::{DataReader, DataWriter};
 use super::entry::Entry;
 use super::file_system::{FileKind, OpenMode, SeriesDir};
 use super::index::{IndexReader, IndexWriter};
-use super::log::{self, LogEntry, LogReader, LogWriter};
+use super::log::{LogEntry, LogReader, LogWriter};
 use super::utils::IntoEntriesIterator;
 use super::Compression;
 
@@ -223,7 +221,7 @@ impl IntoEntriesIterator for Arc<SeriesReader> {
 mod test {
     use super::super::file_system;
     use super::*;
-    use crate::db::test_utils::create_temp_dir;
+    use super::super::test_utils::create_temp_dir;
 
     #[test]
     fn test_series_read_write() {

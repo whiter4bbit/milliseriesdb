@@ -1,4 +1,4 @@
-use super::Entry;
+use crate::storage::Entry;
 use serde_derive::{Deserialize, Serialize};
 
 #[allow(dead_code)]

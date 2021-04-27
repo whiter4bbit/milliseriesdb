@@ -177,8 +177,8 @@ impl LogWriter {
 #[cfg(test)]
 mod test {
     use super::super::file_system;
-    use super::*;
-    use crate::db::test_utils::create_temp_dir;
+    use super::super::test_utils::create_temp_dir;
+    use super::*;    
     use std::io::{Cursor, SeekFrom};
 
     #[test]

@@ -1,5 +1,5 @@
 use clap::clap_app;
-use milliseriesdb::db::{file_system, series_table, Compression, SyncMode};
+use milliseriesdb::storage::{file_system, series_table, Compression, SyncMode};
 use std::sync::Arc;
 
 mod append;

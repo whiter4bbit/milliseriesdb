@@ -99,7 +99,7 @@ impl IndexReader {
 mod test {
     use super::super::file_system::{self, FileKind, OpenMode};
     use super::*;
-    use crate::db::test_utils::create_temp_dir;
+    use super::super::test_utils::create_temp_dir;
 
     #[test]
     fn test_ceiling() {

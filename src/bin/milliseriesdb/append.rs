@@ -1,5 +1,5 @@
 use flate2::read::GzDecoder;
-use milliseriesdb::db::{Compression, Entry, SeriesTable};
+use milliseriesdb::storage::{Compression, Entry, SeriesTable};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::str::FromStr;

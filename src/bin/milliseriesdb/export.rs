@@ -1,4 +1,4 @@
-use milliseriesdb::db::SeriesTable;
+use milliseriesdb::storage::SeriesTable;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 

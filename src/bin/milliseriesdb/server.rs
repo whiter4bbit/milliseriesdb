@@ -1,7 +1,6 @@
 use chrono::{TimeZone, Utc};
-use milliseriesdb::db::{
-    execute_query_async, Aggregation, Compression, Entry, Query, QueryExpr, Row, SeriesTable,
-};
+use milliseriesdb::query::{Aggregation, QueryBuilder, Row, Statement, StatementExpr};
+use milliseriesdb::storage::{Compression, Entry, SeriesTable};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::{Infallible, TryFrom};
 use std::io;
@@ -76,12 +75,12 @@ mod restapi {
 
     pub async fn query(
         id: String,
-        query_expr: QueryExpr,
+        statement_expr: StatementExpr,
         series_table: Arc<SeriesTable>,
     ) -> Result<Box<dyn warp::Reply>, Infallible> {
         Ok(match series_table.reader(id) {
-            Some(reader) => match Query::try_from(query_expr) {
-                Ok(query) => match execute_query_async(query, reader).await {
+            Some(reader) => match Statement::try_from(statement_expr) {
+                Ok(statement) => match reader.query(statement).rows() {
                     Ok(rows) => Box::new(warp::reply::json(&JsonRows::from_rows(rows))),
                     _ => Box::new(StatusCode::INTERNAL_SERVER_ERROR),
                 },
@@ -106,7 +105,7 @@ pub async fn start_server(series_table: Arc<SeriesTable>, addr: SocketAddr) -> i
 
     let query_series = warp::path!("series" / String)
         .and(warp::get())
-        .and(warp::query::<QueryExpr>())
+        .and(warp::query::<StatementExpr>())
         .and(restapi::with_series_table(series_table.clone()))
         .and_then(restapi::query);
 

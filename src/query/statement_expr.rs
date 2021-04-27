@@ -1,12 +1,12 @@
-use super::agg::Aggregator;
-use super::Query;
+use super::aggregation::Aggregator;
+use super::statement::Statement;
 use chrono::{TimeZone, Utc};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::str::FromStr;
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct QueryExpr {
+pub struct StatementExpr {
     pub from: String,
     pub group_by: String,
     pub aggregators: String,
@@ -69,9 +69,9 @@ impl FromStr for Aggregator {
     }
 }
 
-impl TryFrom<QueryExpr> for Query {
+impl TryFrom<StatementExpr> for Statement {
     type Error = ();
-    fn try_from(source: QueryExpr) -> Result<Query, Self::Error> {
+    fn try_from(source: StatementExpr) -> Result<Statement, Self::Error> {
         let FromTimestamp(from) = source.from.parse()?;
         let GroupByMillis(group_by) = source.group_by.parse()?;
         let aggregators = source
@@ -81,7 +81,7 @@ impl TryFrom<QueryExpr> for Query {
             .collect::<Result<Vec<Aggregator>, ()>>()?;
         let limit = source.limit.parse::<usize>().map_err(|_| ())?;
 
-        Ok(Query {
+        Ok(Statement {
             from: from,
             group_by: group_by,
             aggregators: aggregators,
@@ -95,7 +95,7 @@ mod tests {
     use super::*;
     #[test]
     fn test() {
-        let expr = QueryExpr {
+        let expr = StatementExpr {
             from: "10".to_string(),
             group_by: "hour".to_string(),
             aggregators: "mean".to_string(),
@@ -103,13 +103,13 @@ mod tests {
         };
 
         assert_eq!(
-            Query {
+            Statement {
                 from: 10,
                 group_by: 60 * 60 * 1000,
                 aggregators: vec![Aggregator::Mean],
                 limit: 1000,
             },
-            Query::try_from(expr).unwrap()
+            Statement::try_from(expr).unwrap()
         );
     }
 }
