@@ -4,38 +4,46 @@ use std::env;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::process::exit;
+use flate2::read::GzDecoder;
 
 fn append(db_path: &str, input_csv: &str) -> io::Result<()> {
-    let mut db = DB::open_or_create(db_path, SyncMode::Every(1000))?;
-    let reader = BufReader::new(File::open(input_csv)?);
-    let mut buffer = Vec::new();
-    let batch_size = 100;
-    for entry in reader.lines() {
-        let entry = entry?;
-        let mut tokens = entry.split(';');
-        match (tokens.next(), tokens.next()) {
-            (Some(timestamp), Some(value)) => {
-                let entry = timestamp.trim().parse::<u64>().ok().and_then(|timestamp| {
-                    value.trim().parse::<f64>().ok().map(|value| Entry {
-                        ts: timestamp,
-                        value: value,
-                    })
-                });
-                if entry.is_some() {
-                    buffer.push(entry.unwrap());
+    fn append_internal<R: BufRead>(db_path: &str, reader: R) -> io::Result<()> {
+        let mut db = DB::open_or_create(db_path, SyncMode::Every(1000))?;
+        let mut buffer = Vec::new();
+        let batch_size = 100;
+        for entry in reader.lines() {
+            let entry = entry?;
+            let mut tokens = entry.split(';');
+            match (tokens.next(), tokens.next()) {
+                (Some(timestamp), Some(value)) => {
+                    let entry = timestamp.trim().parse::<u64>().ok().and_then(|timestamp| {
+                        value.trim().parse::<f64>().ok().map(|value| Entry {
+                            ts: timestamp,
+                            value: value,
+                        })
+                    });
+                    if entry.is_some() {
+                        buffer.push(entry.unwrap());
+                    }
+                    if buffer.len() == batch_size {
+                        db.append(&buffer)?;
+                        buffer.clear();
+                    }
                 }
-                if buffer.len() == batch_size {
-                    db.append(&buffer)?;
-                    buffer.clear();
-                }
+                _ => {}
             }
-            _ => {}
         }
+        if !buffer.is_empty() {
+            db.append(&buffer)?;
+        }
+        Ok(())    
     }
-    if !buffer.is_empty() {
-        db.append(&buffer)?;
+    
+    if input_csv.ends_with(".gz") {
+        append_internal(db_path, BufReader::new(GzDecoder::new(File::open(input_csv)?)?))
+    } else {
+        append_internal(db_path, BufReader::new(File::open(input_csv)?))        
     }
-    Ok(())
 }
 
 fn export(db_path: &str, output_csv: &str, from_ts: u64) -> io::Result<()> {
