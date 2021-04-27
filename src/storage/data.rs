@@ -131,16 +131,16 @@ impl DataReader {
         Ok(reader)
     }
 
-    pub fn read_block<D: Extend<Entry>>(&mut self, destination: &mut D) -> io::Result<u64> {
+    pub fn read_block(&mut self) -> io::Result<(Vec<Entry>, u64)> {
         let header = BlockHeader::read(&mut self.file)?;
         let mut payload = self.file.by_ref().take(header.payload_size as u64);
 
         let compression = header.compression;
         let entries = compression.read(&mut payload, header.entries_count)?;
-        destination.extend(entries);
 
         self.offset += header.payload_size as u64 + BLOCK_HEADER_SIZE;
-        Ok(self.offset)
+        
+        Ok((entries, self.offset))
     }
 }
 
@@ -173,14 +173,11 @@ mod test {
         {
             let file = series_dir.open(FileKind::Data, OpenMode::Read).unwrap();
             let mut reader = DataReader::create(file, 0).unwrap();
-            let mut result: Vec<Entry> = Vec::new();
 
-            reader.read_block(&mut result).unwrap();
+            let (result, _) = reader.read_block().unwrap();
             assert_eq!(entries[0..3].to_owned(), result);
 
-            result.clear();
-
-            reader.read_block(&mut result).unwrap();
+            let (result, _) = reader.read_block().unwrap();
             assert_eq!(entries[3..5].to_owned(), result);
         }
     }

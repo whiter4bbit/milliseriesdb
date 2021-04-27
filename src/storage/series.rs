@@ -71,7 +71,7 @@ impl SeriesWriter {
     }
 
     #[allow(dead_code)]
-    pub fn append_batch<'a, I>(&mut self, batch: I, compression: Compression) -> io::Result<()>
+    pub fn append<'a, I>(&mut self, batch: I, compression: Compression) -> io::Result<()>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
@@ -156,7 +156,9 @@ pub struct SeriesIterator {
 impl SeriesIterator {
     fn fetch_block(&mut self) -> io::Result<()> {
         if self.offset < self.size {
-            self.offset = self.data_reader.read_block(&mut self.buffer)?;
+            let (entries, offset) = self.data_reader.read_block()?;
+            self.offset = offset;
+            self.buffer.extend(entries);
 
             while self
                 .buffer
@@ -200,9 +202,12 @@ impl SeriesWriterGuard {
         })
     }
 
-    pub fn append(&self, batch: &[Entry], compression: Compression) -> io::Result<()> {
+    pub fn append<'a, I>(&self, batch: I, compression: Compression) -> io::Result<()>
+    where
+        I: IntoIterator<Item = &'a Entry> + 'a,
+    {
         let mut writer = self.writer.lock().unwrap();
-        writer.append_batch(batch, compression)
+        writer.append(batch, compression)
     }
 
     pub async fn append_async(
@@ -213,7 +218,7 @@ impl SeriesWriterGuard {
         let writer = self.writer.clone();
         tokio::task::spawn_blocking(move || {
             let mut writer = writer.lock().unwrap();
-            writer.append_batch(&batch, compression)
+            writer.append(&batch, compression)
         })
         .await
         .unwrap()
@@ -262,9 +267,9 @@ mod test {
         ];
         {
             let mut writer = SeriesWriter::create(series_dir.clone(), SyncMode::Never).unwrap();
-            writer.append_batch(&entries[0..5], compr.clone()).unwrap();
-            writer.append_batch(&entries[5..8], compr.clone()).unwrap();
-            writer.append_batch(&entries[8..11], compr.clone()).unwrap();
+            writer.append(&entries[0..5], compr.clone()).unwrap();
+            writer.append(&entries[5..8], compr.clone()).unwrap();
+            writer.append(&entries[8..11], compr.clone()).unwrap();
         }
 
         let reader = SeriesReader::create(series_dir.clone()).unwrap();
@@ -295,7 +300,7 @@ mod test {
 
         {
             let mut writer = SeriesWriter::create(series_dir, SyncMode::Never).unwrap();
-            writer.append_batch(&entries[11..13], compr).unwrap();
+            writer.append(&entries[11..13], compr).unwrap();
         }
 
         assert_eq!(
