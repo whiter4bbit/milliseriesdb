@@ -1,0 +1,5 @@
+GET http://localhost:8080/series/temp
+    ?from=10
+    &group_by=day
+    &aggregators=mean
+    &limit=30

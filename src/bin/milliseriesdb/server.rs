@@ -1,15 +1,15 @@
-use milliseriesdb::db::{Entry, DB};
+use milliseriesdb::db::{Entry, DB, Executor, Row, Query, QueryExpression};
 use serde_derive::{Deserialize, Serialize};
-use std::convert::Infallible;
+use std::convert::{TryFrom, Infallible};
 use std::io;
 use std::net::SocketAddr;
 use warp::{http::StatusCode, Filter};
 
-struct DBGuard {
+struct DBVar {
     db: DB,
 }
 
-impl DBGuard {
+impl DBVar {
     fn with_db(&self) -> impl Filter<Extract = (DB,), Error = Infallible> + Clone {
         let db = self.db.clone();
         warp::any().map(move || db.clone())
@@ -36,18 +36,6 @@ impl JsonEntries {
                 value: json.value,
             })
             .collect()
-    }
-}
-
-#[derive(Deserialize, Serialize)]
-pub struct JsonQuery {
-    pub from: String,
-    pub limit: Option<usize>,
-}
-
-impl JsonQuery {
-    pub fn from_timestamp(&self) -> Option<u64> {
-        self.from.parse::<u64>().ok()
     }
 }
 
@@ -78,31 +66,19 @@ mod handlers {
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         })
     }
-    pub async fn query_handler(id: String, query: JsonQuery, db: DB) -> Result<Box<dyn warp::Reply>, Infallible> {
-        fn query_internal(id: String, from_timestamp: u64, limit: usize, db: DB) -> io::Result<Option<JsonEntries>> {
-            let series = { db.clone().get_series(id) }?;
-            match series {
-                Some(series) => {
-                    let iterator = series.iterator(from_timestamp)?;
-                    let mut entries: Vec<JsonEntry> = Vec::new();
-                    for entry in iterator.take(limit) {
-                        let entry = entry?;
-                        entries.push(JsonEntry {
-                            timestamp: entry.ts,
-                            value: entry.value,
-                        });
-                    }
-                    Ok(Some(JsonEntries { entries: entries }))
-                }
+    pub async fn query_handler(id: String, query_expr: QueryExpression, db: DB) -> Result<Box<dyn warp::Reply>, Infallible> {
+        fn query_internal(id: String, query: Query, db: DB) -> io::Result<Option<Vec<Row>>> {
+            match db.clone().get_series(id)? {
+                Some(series) => Ok(Some(Executor::new(&query).execute(series)?)),
                 None => Ok(None),
             }
         }
-        Ok(match (query.from_timestamp(), query.limit.unwrap_or(1000)) {
-            (Some(from_timestamp), limit) => {
-                let result = tokio::task::spawn_blocking(move || query_internal(id, from_timestamp, limit, db));
+        Ok(match Query::try_from(query_expr) {
+            Ok(query) => {
+                let result = tokio::task::spawn_blocking(move || query_internal(id, query, db));
                 match result.await {
                     Ok(Ok(None)) => Box::new(StatusCode::NOT_FOUND),
-                    Ok(Ok(Some(entries))) => Box::new(warp::reply::json(&entries)),
+                    Ok(Ok(Some(rows))) => Box::new(warp::reply::json(&rows)),
                     _ => Box::new(StatusCode::INTERNAL_SERVER_ERROR),
                 }
             }
@@ -112,7 +88,7 @@ mod handlers {
 }
 
 pub async fn start_server(db: DB, addr: SocketAddr) -> io::Result<()> {
-    let db = DBGuard { db: db };
+    let db = DBVar { db: db };
 
     let create_series = warp::path!("series" / String)
         .and(warp::put())
@@ -127,7 +103,7 @@ pub async fn start_server(db: DB, addr: SocketAddr) -> io::Result<()> {
 
     let query_series = warp::path!("series" / String)
         .and(warp::get())
-        .and(warp::query::<JsonQuery>())
+        .and(warp::query::<QueryExpression>())
         .and(db.with_db())
         .and_then(handlers::query_handler);
 
