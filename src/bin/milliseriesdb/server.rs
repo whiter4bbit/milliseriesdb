@@ -1,10 +1,8 @@
-use milliseriesdb::db::{Entry, SyncMode, DB};
+use milliseriesdb::db::{Entry, DB};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::Infallible;
-use std::env;
 use std::io;
-use std::path::Path;
-use std::process::exit;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use warp::{http::StatusCode, Filter};
 
@@ -123,9 +121,9 @@ mod handlers {
     }
 }
 
-async fn start_server<P: AsRef<Path>>(base_path: P, port: u16) -> io::Result<()> {
+pub async fn start_server(db: DB, addr: SocketAddr) -> io::Result<()> {
     let db = DBGuard {
-        db: Arc::new(Mutex::new(DB::open(base_path, SyncMode::Every(100))?)),
+        db: Arc::new(Mutex::new(db)),
     };
 
     let create_series = warp::path!("series" / String)
@@ -147,16 +145,16 @@ async fn start_server<P: AsRef<Path>>(base_path: P, port: u16) -> io::Result<()>
 
     let server_api = create_series.or(append_to_series).or(query_series);
 
-    Ok(warp::serve(server_api).run(([127, 0, 0, 1], port)).await)
+    Ok(warp::serve(server_api).run(addr).await)
 }
 
-#[tokio::main]
-async fn main() {
-    let mut args = env::args();
-    args.next();
+// #[tokio::main]
+// async fn main() {
+//     let mut args = env::args();
+//     args.next();
 
-    match (args.next(), args.next().and_then(|port| port.parse::<u16>().ok())) {
-        (Some(base_path), Some(port)) => start_server(base_path, port).await.unwrap(),
-        _ => exit(1),
-    }
-}
+//     match (args.next(), args.next().and_then(|port| port.parse::<u16>().ok())) {
+//         (Some(base_path), Some(port)) => start_server(base_path, port).await.unwrap(),
+//         _ => exit(1),
+//     }
+// }
