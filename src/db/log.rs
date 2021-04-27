@@ -1,4 +1,4 @@
-use crate::db::io_utils::{self, primitive_checksum, ReadBytes, WriteBytes};
+use crate::db::io_utils::{self, checksum_u64, ReadBytes, ReadError, ReadResult, WriteBytes};
 use std::fs::{read_dir, File};
 use std::io;
 use std::io::prelude::*;
@@ -12,22 +12,27 @@ pub struct LogEntry {
 }
 
 impl LogEntry {
-    fn read_entry<R: Read>(read: &mut R) -> io::Result<LogEntry> {
-        let data_offset = read.read_u64()?;
-        let index_offset = read.read_u64()?;
-        let highest_ts = read.read_u64()?;
-        let checksum = read.read_u64()?;
-        Ok(LogEntry {
-            data_offset: data_offset,
-            index_offset: index_offset,
-            highest_ts: highest_ts,
-        })
+    fn read_entry<R: Read>(read: &mut R) -> ReadResult<LogEntry> {
+        let data_offset = read.read_u64().map_err(|e| ReadError::Other(e))?;
+        let index_offset = read.read_u64().map_err(|e| ReadError::Other(e))?;
+        let highest_ts = read.read_u64().map_err(|e| ReadError::Other(e))?;
+        let target_checksum = read.read_u64().map_err(|e| ReadError::Other(e))?;
+        let actual_checksum = checksum_u64(&[data_offset, index_offset, highest_ts]);
+
+        match target_checksum == actual_checksum {
+            true => Ok(LogEntry {
+                data_offset: data_offset,
+                index_offset: index_offset,
+                highest_ts: highest_ts,
+            }),
+            _ => Err(ReadError::CorruptedBlock),
+        }
     }
     fn write_entry<W: Write>(&self, write: &mut W) -> io::Result<()> {
         write.write_u64(&self.data_offset)?;
         write.write_u64(&self.index_offset)?;
         write.write_u64(&self.highest_ts)?;
-        write.write_u64(&primitive_checksum(&[self.data_offset, self.index_offset, self.highest_ts]))?;
+        write.write_u64(&checksum_u64(&[self.data_offset, self.index_offset, self.highest_ts]))?;
         Ok(())
     }
 }
@@ -53,9 +58,12 @@ fn read_last_log_entry_of(path: PathBuf) -> io::Result<Option<LogEntry>> {
     let mut last: Option<LogEntry> = None;
     loop {
         match LogEntry::read_entry(&mut file) {
-            Err(error) => match error.kind() {
-                io::ErrorKind::UnexpectedEof => break,
-                _ => return Err(error),
+            Err(error) => match error {
+                ReadError::Other(other) => match other.kind() {
+                    io::ErrorKind::UnexpectedEof => break,
+                    _ => return Err(other),
+                },
+                ReadError::CorruptedBlock => break,
             },
             Ok(entry) => last = Some(entry),
         }
@@ -103,13 +111,41 @@ mod test {
     fn test_log_entry_read_write() {
         let mut cursor = Cursor::new(Vec::new());
         let entry = LogEntry {
-            data_offset: 1e18 as u64,
-            index_offset: 1e18 as u64,
+            data_offset: 123 as u64,
+            index_offset: 321 as u64,
             highest_ts: 110,
         };
-        entry.write_entry(&mut cursor).unwrap();
-        cursor.set_position(0);
+        {
+            entry.write_entry(&mut cursor).unwrap();
+            cursor.set_position(0);
+        }
         assert_eq!(entry, LogEntry::read_entry(&mut cursor).unwrap());
+
+        {
+            cursor.set_position(0);
+            cursor.write(&[1, 2, 3]).unwrap();
+            cursor.set_position(0);
+        }
+        assert_eq!(
+            true,
+            match LogEntry::read_entry(&mut cursor) {
+                Err(ReadError::CorruptedBlock) => true,
+                _ => false,
+            }
+        );
+        {
+            cursor.set_position(0);
+            cursor.write_u64(&321).unwrap();
+            cursor.write_u64(&123).unwrap();
+            cursor.set_position(0);
+        }
+        assert_eq!(
+            true,
+            match LogEntry::read_entry(&mut cursor) {
+                Err(ReadError::CorruptedBlock) => true,
+                _ => false,
+            }
+        );
     }
 
     #[test]

@@ -62,15 +62,18 @@ pub trait ReadBytes: Read {
 
 impl<R: Read> ReadBytes for R {}
 
-pub fn primitive_checksum(p: &[u64]) -> u64 {
+pub fn checksum_u64(p: &[u64]) -> u64 {
     let mut sum = 0u64;
     for x in p {
-        sum = sum.overflowing_add(*x).0;
+        sum = sum.overflowing_shl(1).0.overflowing_add(*x).0;
     }
     return sum;
 }
 
-enum ReadError {
-    IoError(io::Error),
+#[derive(Debug)]
+pub enum ReadError {
+    Other(io::Error),
     CorruptedBlock,
 }
+
+pub type ReadResult<T> = Result<T, ReadError>;
