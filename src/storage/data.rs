@@ -39,7 +39,6 @@ impl BlockHeader {
         };
         let payload_size = file.read_u32()? as usize;
         let target_checksum = file.read_u32()?;
-        
         let checksum = header_checksum(entries_count, &compression, payload_size);
 
         if target_checksum != checksum {
@@ -81,23 +80,30 @@ impl DataWriter {
 
         Ok(writer)
     }
-    pub fn append(&mut self, block: &[&Entry], compression: Compression) -> io::Result<u64> {
+
+    pub fn append<'a, I>(&mut self, block: I, compression: Compression) -> io::Result<u64>
+    where
+        I: IntoIterator<Item = &'a Entry> + 'a,
+    {
         self.buffer.set_position(0);
 
-        compression.write(block, &mut self.buffer)?;
+        let entries: Vec<&Entry> = block.into_iter().collect();
+
+        compression.write(&entries, &mut self.buffer)?;
 
         let block_size = self.buffer.position();
 
-        BlockHeader {
-            entries_count: block.len(),
+        let block_header = BlockHeader {
+            entries_count: entries.len(),
             compression,
             payload_size: block_size as usize,
-        }
-        .write(&mut self.file)?;
+        };
 
-        let payload = &self.buffer.get_ref()[0..block_size as usize];
+        block_header.write(&mut self.file)?;
 
-        self.file.write_all(payload)?;
+        let block_payload = &self.buffer.get_ref()[0..block_size as usize];
+
+        self.file.write_all(block_payload)?;
 
         self.offset += block_size + BLOCK_HEADER_SIZE;
 
@@ -128,11 +134,11 @@ impl DataReader {
     pub fn read_block<D: Extend<Entry>>(&mut self, destination: &mut D) -> io::Result<u64> {
         let header = BlockHeader::read(&mut self.file)?;
         let mut payload = self.file.by_ref().take(header.payload_size as u64);
-        destination.extend(
-            header
-                .compression
-                .read(&mut payload, header.entries_count)?,
-        );
+
+        let compression = header.compression;
+        let entries = compression.read(&mut payload, header.entries_count)?;
+        destination.extend(entries);
+
         self.offset += header.payload_size as u64 + BLOCK_HEADER_SIZE;
         Ok(self.offset)
     }
@@ -157,26 +163,16 @@ mod test {
             Entry { ts: 5, value: 51.0 },
         ];
 
-        let mut writer =
-            DataWriter::create(series_dir.open(FileKind::Data, OpenMode::Write).unwrap(), 0)
-                .unwrap();
-        writer
-            .append(
-                &entries[0..3].iter().collect::<Vec<&Entry>>(),
-                Compression::Deflate,
-            )
-            .unwrap();
-        writer
-            .append(
-                &entries[3..5].iter().collect::<Vec<&Entry>>(),
-                Compression::Deflate,
-            )
-            .unwrap();
+        {
+            let file = series_dir.open(FileKind::Data, OpenMode::Write).unwrap();
+            let mut writer = DataWriter::create(file, 0).unwrap();
+            writer.append(&entries[0..3], Compression::Deflate).unwrap();
+            writer.append(&entries[3..5], Compression::Deflate).unwrap();
+        }
 
         {
-            let mut reader =
-                DataReader::create(series_dir.open(FileKind::Data, OpenMode::Read).unwrap(), 0)
-                    .unwrap();
+            let file = series_dir.open(FileKind::Data, OpenMode::Read).unwrap();
+            let mut reader = DataReader::create(file, 0).unwrap();
             let mut result: Vec<Entry> = Vec::new();
 
             reader.read_block(&mut result).unwrap();

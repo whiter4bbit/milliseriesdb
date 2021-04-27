@@ -69,27 +69,37 @@ impl SeriesWriter {
         }
         Ok(())
     }
+
     #[allow(dead_code)]
-    pub fn append_batch(&mut self, batch: &[Entry], compression: Compression) -> io::Result<()> {
+    pub fn append_batch<'a, I>(&mut self, batch: I, compression: Compression) -> io::Result<()>
+    where
+        I: IntoIterator<Item = &'a Entry> + 'a,
+    {
         let mut ordered: Vec<&Entry> = batch
-            .iter()
+            .into_iter()
             .filter(|entry| entry.ts >= self.last_log_entry.highest_ts)
             .collect();
         ordered.sort_by_key(|entry| entry.ts);
         if ordered.is_empty() {
             return Ok(());
         }
+
+        let last_entry_ts = ordered.last().unwrap().ts;
+
         let index_offset = self
             .index_writer
-            .append(ordered.last().unwrap().ts, self.last_log_entry.data_offset)?;
-        let data_offset = self.data_writer.append(&ordered, compression)?;
+            .append(last_entry_ts, self.last_log_entry.data_offset)?;
+
+        let data_offset = self.data_writer.append(ordered, compression)?;
         let last_log_entry = LogEntry {
             data_offset,
             index_offset,
-            highest_ts: ordered.last().unwrap().ts,
+            highest_ts: last_entry_ts,
         };
+
         self.log_writer.append(&last_log_entry)?;
         self.last_log_entry = last_log_entry;
+
         self.fsync()
     }
 }
@@ -220,8 +230,12 @@ impl IntoEntriesIterator for Arc<SeriesReader> {
 #[cfg(test)]
 mod test {
     use super::super::file_system;
-    use super::*;
     use super::super::test_utils::create_temp_dir;
+    use super::*;
+
+    fn entry(ts: u64, value: f64) -> Entry {
+        Entry { ts, value }
+    }
 
     #[test]
     fn test_series_read_write() {
@@ -229,56 +243,28 @@ mod test {
         let file_system = file_system::open(&db_dir.path).unwrap();
         let series_dir = file_system.series("series1").unwrap();
 
+        let compr = Compression::Deflate;
+
         let entries = [
-            Entry { ts: 1, value: 11.0 },
-            Entry { ts: 2, value: 12.0 },
-            Entry { ts: 3, value: 13.0 },
-            Entry { ts: 5, value: 15.0 },
-            Entry { ts: 8, value: 18.0 },
-            Entry {
-                ts: 10,
-                value: 110.0,
-            },
-            Entry {
-                ts: 20,
-                value: 120.0,
-            },
-            Entry {
-                ts: 21,
-                value: 121.0,
-            },
-            Entry {
-                ts: 40,
-                value: 140.0,
-            },
-            Entry {
-                ts: 100,
-                value: 1100.0,
-            },
-            Entry {
-                ts: 110,
-                value: 1110.0,
-            },
-            Entry {
-                ts: 120,
-                value: 1120.0,
-            },
-            Entry {
-                ts: 140,
-                value: 1140.0,
-            },
+            entry(1, 11.0),
+            entry(2, 12.0),
+            entry(3, 13.0),
+            entry(5, 15.0),
+            entry(8, 18.0),
+            entry(10, 110.0),
+            entry(20, 120.0),
+            entry(21, 121.0),
+            entry(40, 140.0),
+            entry(100, 1100.0),
+            entry(110, 1110.0),
+            entry(120, 1120.0),
+            entry(140, 1140.0),
         ];
         {
             let mut writer = SeriesWriter::create(series_dir.clone(), SyncMode::Never).unwrap();
-            writer
-                .append_batch(&entries[0..5], Compression::None)
-                .unwrap();
-            writer
-                .append_batch(&entries[5..8], Compression::None)
-                .unwrap();
-            writer
-                .append_batch(&entries[8..11], Compression::None)
-                .unwrap();
+            writer.append_batch(&entries[0..5], compr.clone()).unwrap();
+            writer.append_batch(&entries[5..8], compr.clone()).unwrap();
+            writer.append_batch(&entries[8..11], compr.clone()).unwrap();
         }
 
         let reader = SeriesReader::create(series_dir.clone()).unwrap();
@@ -309,9 +295,7 @@ mod test {
 
         {
             let mut writer = SeriesWriter::create(series_dir, SyncMode::Never).unwrap();
-            writer
-                .append_batch(&entries[11..13], Compression::None)
-                .unwrap();
+            writer.append_batch(&entries[11..13], compr).unwrap();
         }
 
         assert_eq!(
