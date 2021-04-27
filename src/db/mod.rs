@@ -13,7 +13,7 @@ mod test_utils;
 
 pub use entry::Entry;
 pub use series::{Series, SyncMode};
-pub use executor::{Query, QueryExpression, Executor, Row};
+pub use executor::{Query, QueryExpr, Executor, Row, Aggregation};
 pub use compression::Compression;
 use std::collections::HashMap;
 use std::fs::create_dir_all;
