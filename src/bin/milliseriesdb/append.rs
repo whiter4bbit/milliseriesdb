@@ -2,33 +2,36 @@ use flate2::read::GzDecoder;
 use milliseriesdb::db::{Entry, DB};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
+use std::str::FromStr;
+
+struct CsvEntry(u64, f64);
+
+impl FromStr for CsvEntry {
+    type Err = io::Error;
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let mut parts = input.split(';').map(|p| p.trim());
+        match (
+            parts.next().and_then(|ts| ts.parse::<u64>().ok()),
+            parts.next().and_then(|val| val.parse::<f64>().ok()),
+        ) {
+            (Some(ts), Some(val)) => Ok(CsvEntry(ts, val)),
+            _ => Err(io::Error::new(io::ErrorKind::Other, "can not parse a line")),
+        }
+    }
+}
 
 pub fn append(db: &mut DB, series_id: &str, input_csv: &str) -> io::Result<()> {
-    fn append_internal<R: BufRead>(db: &mut DB, series_id: &str, reader: R) -> io::Result<()> {
+    fn append_internal(db: &mut DB, series_id: &str, reader: Box<dyn BufRead>) -> io::Result<()> {
         let series = db.create_series(series_id)?;
         let mut writer = series.writer();
         let mut buffer = Vec::new();
         let batch_size = 100;
         for entry in reader.lines() {
-            let entry = entry?;
-            let mut tokens = entry.split(';');
-            match (tokens.next(), tokens.next()) {
-                (Some(timestamp), Some(value)) => {
-                    let entry = timestamp.trim().parse::<u64>().ok().and_then(|timestamp| {
-                        value.trim().parse::<f64>().ok().map(|value| Entry {
-                            ts: timestamp,
-                            value: value,
-                        })
-                    });
-                    if entry.is_some() {
-                        buffer.push(entry.unwrap());
-                    }
-                    if buffer.len() == batch_size {
-                        writer.append(&buffer)?;
-                        buffer.clear();
-                    }
-                }
-                _ => {}
+            let CsvEntry(ts, val) = entry?.parse::<CsvEntry>()?;
+            buffer.push(Entry { ts: ts, value: val });
+            if buffer.len() == batch_size {
+                writer.append(&buffer)?;
+                buffer.clear();
             }
         }
         if !buffer.is_empty() {
@@ -36,9 +39,14 @@ pub fn append(db: &mut DB, series_id: &str, input_csv: &str) -> io::Result<()> {
         }
         Ok(())
     }
-    if input_csv.ends_with(".gz") {
-        append_internal(db, series_id, BufReader::new(GzDecoder::new(File::open(input_csv)?)?))
-    } else {
-        append_internal(db, series_id, BufReader::new(File::open(input_csv)?))
-    }
+
+    append_internal(
+        db,
+        series_id,
+        if input_csv.ends_with(".gz") {
+            Box::new(BufReader::new(GzDecoder::new(File::open(input_csv)?)?))
+        } else {
+            Box::new(BufReader::new(File::open(input_csv)?))
+        },
+    )
 }
