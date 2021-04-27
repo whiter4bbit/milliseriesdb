@@ -26,18 +26,16 @@ pub struct DB {
     series_dir: PathBuf,
     series: Arc<Mutex<HashMap<String, Arc<Series>>>>,
     sync_mode: SyncMode,
-    compression: Compression,
 }
 
 impl DB {
-    pub fn open<P: AsRef<Path>>(base_path: P, sync_mode: SyncMode, compression: Compression) -> io::Result<DB> {
+    pub fn open<P: AsRef<Path>>(base_path: P, sync_mode: SyncMode) -> io::Result<DB> {
         let series_dir = base_path.as_ref().join("series");
         create_dir_all(series_dir.clone())?;
         Ok(DB {
             series_dir: series_dir.clone(),
             series: Arc::new(Mutex::new(HashMap::new())),
             sync_mode: sync_mode,
-            compression: compression,
         })
     }
 
@@ -49,7 +47,7 @@ impl DB {
         let series_dir = self.series_dir.clone().join(name.as_ref());
         match series_dir.is_dir() || create {
             true => {
-                let new = Arc::new(Series::open_or_create(series_dir, self.sync_mode, self.compression.clone())?);
+                let new = Arc::new(Series::open_or_create(series_dir, self.sync_mode)?);
                 series.insert(name.as_ref().to_string(), new.clone());
                 Ok(Some(new.clone()))
             }
@@ -74,7 +72,7 @@ mod test {
     fn test_db_basic() {
         let db_dir = create_temp_dir("test-base").unwrap();
 
-        let mut db = DB::open(&db_dir.path, SyncMode::Never, Compression::None).unwrap();
+        let mut db = DB::open(&db_dir.path, SyncMode::Never).unwrap();
 
         assert!(db.get_series("co2").unwrap().is_none());
         let _ = db.create_series("co2").unwrap();

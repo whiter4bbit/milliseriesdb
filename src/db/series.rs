@@ -32,7 +32,7 @@ pub struct SeriesWriter {
 
 impl SeriesWriter {
     #[allow(dead_code)]
-    pub fn create<P: AsRef<Path>>(path: P, sync_mode: SyncMode, compression: Compression) -> io::Result<SeriesWriter> {
+    pub fn create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<SeriesWriter> {
         create_dir_all(path.as_ref())?;
         let last_entry = match log::read_last_log_entry(path.as_ref())? {
             Some(entry) => entry,
@@ -46,7 +46,7 @@ impl SeriesWriter {
         log_writer.append(&last_entry)?;
         log_writer.sync()?;
         Ok(SeriesWriter {
-            data_writer: DataWriter::create(path.as_ref(), last_entry.data_offset, compression)?,
+            data_writer: DataWriter::create(path.as_ref(), last_entry.data_offset)?,
             index_writer: IndexWriter::open(path.as_ref(), last_entry.index_offset)?,
             log_writer: log_writer,
             last_log_entry: last_entry,
@@ -69,7 +69,7 @@ impl SeriesWriter {
         Ok(())
     }
     #[allow(dead_code)]
-    pub fn append_batch(&mut self, batch: &[Entry]) -> io::Result<()> {
+    pub fn append_batch(&mut self, batch: &[Entry], compression: Compression) -> io::Result<()> {
         let mut ordered: Vec<&Entry> = batch.iter().filter(|entry| entry.ts >= self.last_log_entry.highest_ts).collect();
         ordered.sort_by_key(|entry| entry.ts);
         if ordered.is_empty() {
@@ -78,7 +78,7 @@ impl SeriesWriter {
         let index_offset = self
             .index_writer
             .append(ordered.last().unwrap().ts, self.last_log_entry.data_offset)?;
-        let data_offset = self.data_writer.append(&ordered)?;
+        let data_offset = self.data_writer.append(&ordered, compression)?;
         let last_log_entry = LogEntry {
             data_offset: data_offset,
             index_offset: index_offset,
@@ -176,9 +176,9 @@ pub struct SeriesWriterGuard {
 }
 
 impl SeriesWriterGuard {
-    pub fn append(&mut self, batch: &[Entry]) -> io::Result<()> {
+    pub fn append(&mut self, batch: &[Entry], compression: Compression) -> io::Result<()> {
         let mut writer = self.writer.lock().unwrap();
-        writer.append_batch(batch)
+        writer.append_batch(batch, compression)
     }
 }
 
@@ -190,10 +190,10 @@ pub struct Series {
 
 impl Series {
     #[allow(dead_code)]
-    pub fn open_or_create<P: AsRef<Path>>(path: P, sync_mode: SyncMode, compression: Compression) -> io::Result<Series> {
+    pub fn open_or_create<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> io::Result<Series> {
         Ok(Series {
             writer: SeriesWriterGuard {
-                writer: Arc::new(Mutex::new(SeriesWriter::create(path.as_ref(), sync_mode, compression)?)),
+                writer: Arc::new(Mutex::new(SeriesWriter::create(path.as_ref(), sync_mode)?)),
             },
             path: path.as_ref().to_path_buf(),
         })
@@ -247,10 +247,10 @@ mod test {
             Entry { ts: 140, value: 1140.0 },
         ];
         {
-            let mut writer = SeriesWriter::create(&db_dir.path, SyncMode::Never, Compression::None).unwrap();
-            writer.append_batch(&entries[0..5]).unwrap();
-            writer.append_batch(&entries[5..8]).unwrap();
-            writer.append_batch(&entries[8..11]).unwrap();
+            let mut writer = SeriesWriter::create(&db_dir.path, SyncMode::Never).unwrap();
+            writer.append_batch(&entries[0..5], Compression::None).unwrap();
+            writer.append_batch(&entries[5..8], Compression::None).unwrap();
+            writer.append_batch(&entries[8..11], Compression::None).unwrap();
         }
 
         let mut snapshot_1 = SeriesReader::create(&db_dir.path).unwrap();
@@ -268,8 +268,8 @@ mod test {
         );
 
         {
-            let mut writer = SeriesWriter::create(&db_dir.path, SyncMode::Never, Compression::None).unwrap();
-            writer.append_batch(&entries[11..13]).unwrap();
+            let mut writer = SeriesWriter::create(&db_dir.path, SyncMode::Never).unwrap();
+            writer.append_batch(&entries[11..13], Compression::None).unwrap();
         }
 
         let mut snapshot_2 = SeriesReader::create(&db_dir.path).unwrap();

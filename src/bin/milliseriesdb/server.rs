@@ -1,4 +1,4 @@
-use milliseriesdb::db::{Aggregation, Entry, Executor, Query, QueryExpr, Row, DB};
+use milliseriesdb::db::{Aggregation, Entry, Executor, Query, QueryExpr, Row, DB, Compression};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::{Infallible, TryFrom};
 use std::io;
@@ -61,7 +61,7 @@ mod handlers {
         let result = tokio::task::spawn_blocking(move || match db.clone().get_series(id) {
             Ok(Some(series)) => {
                 let mut writer = series.writer();
-                writer.append(&entries.entries)?;
+                writer.append(&entries.entries, Compression::Delta)?;
                 Ok(Some(()))
             }
             Ok(None) => Ok(None),
