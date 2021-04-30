@@ -19,6 +19,6 @@ jobs:
     - name: Build image
       run: docker build -t whiter4bbit/milliseriesdb:latest .
     - name: Push image (Login)
-      run: echo "${{secrets.DOCKERHUB_TOKEN}}" | docker login -u "${{secrets.DOCKERHUB_USER}}" --password-stdin"
+      run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USER }}" --password-stdin
     - name: Push image (Push)
       run: docker push whiter4bbit/milliseriesdb:latest      
