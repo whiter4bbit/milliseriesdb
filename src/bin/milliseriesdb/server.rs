@@ -26,7 +26,7 @@ mod restapi {
                 rows: rows
                     .into_iter()
                     .map(|row| JsonRow {
-                        timestamp: Utc.timestamp_millis(row.ts as i64).to_string(),
+                        timestamp: Utc.timestamp_millis(row.ts as i64).to_rfc3339(),
                         values: row.values,
                     })
                     .collect(),
