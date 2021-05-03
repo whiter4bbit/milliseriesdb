@@ -16,4 +16,4 @@ pub use compression::Compression;
 pub use entry::Entry;
 pub use series::{SeriesReader, SeriesWriterGuard, SyncMode};
 pub use series_table::SeriesTable;
-pub use utils::IntoEntriesIterator;
+pub use utils::{IntoEntriesIterator, LowLevelEntriesIterator, IntoLowLevelEntriesIterator};

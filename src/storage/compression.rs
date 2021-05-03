@@ -56,9 +56,32 @@ fn read_raw<R: Read>(from: &mut R, size: usize) -> io::Result<Vec<Entry>> {
     Ok(entries)
 }
 
+fn read_raw_to_buf<R: Read>(
+    from: &mut R,
+    ts: &mut [u64],
+    values: &mut [f64],
+    size: usize,
+) -> io::Result<()> {
+    for i in 0..size {
+        ts[i] = from.read_u64()?;
+        values[i] = from.read_f64()?;
+    }
+    Ok(())
+}
+
 fn read_deflate<R: Read>(from: &mut R, size: usize) -> io::Result<Vec<Entry>> {
     let mut decoder = DeflateDecoder::new(from);
     read_raw(&mut decoder, size)
+}
+
+fn read_deflate_to_buf<R: Read>(
+    from: &mut R,
+    ts: &mut [u64],
+    values: &mut [f64],
+    size: usize,
+) -> io::Result<()> {
+    let mut decoder = DeflateDecoder::new(from);
+    read_raw_to_buf(&mut decoder, ts, values, size)
 }
 
 fn read_delta<R: Read>(from: &mut R, size: usize) -> io::Result<Vec<Entry>> {
@@ -83,6 +106,29 @@ fn read_delta<R: Read>(from: &mut R, size: usize) -> io::Result<Vec<Entry>> {
     }
 
     Ok(entries)
+}
+
+fn read_delta_to_buf<R: Read>(
+    from: &mut R,
+    t: &mut [u64],
+    values: &mut [f64],
+    size: usize,
+) -> io::Result<()> {
+    let mut last_ts = from.read_u64()?;
+    let mut last_val = from.read_f64()?;
+
+    t[0] = last_ts;
+    values[0] = last_val;
+
+    for i in 1..size {
+        last_ts += from.read_varint::<u64>()?;
+        last_val = f64::from_bits(last_val.to_bits() ^ from.read_varint::<u64>()?);
+
+        t[i] = last_ts;
+        values[i] = last_val;
+    }
+
+    Ok(())
 }
 
 impl Compression {
@@ -118,6 +164,20 @@ impl Compression {
             Compression::Delta => read_delta(from, size),
         }
     }
+
+    pub fn read_to_buf<R: Read>(
+        &self,
+        from: &mut R,
+        t: &mut [u64],
+        values: &mut [f64],
+        size: usize,
+    ) -> io::Result<()> {
+        match self {
+            Compression::None => read_raw_to_buf(from, t, values, size),
+            Compression::Deflate => read_deflate_to_buf(from, t, values, size),
+            Compression::Delta => read_delta_to_buf(from, t, values, size),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -130,22 +190,32 @@ mod test {
         compression.write(entries, &mut cursor)?;
         cursor.set_position(0);
         assert_eq!(
-            entries.into_iter().cloned().cloned().collect::<Vec<Entry>>(),
+            entries
+                .into_iter()
+                .cloned()
+                .cloned()
+                .collect::<Vec<Entry>>(),
             compression.read(&mut cursor, entries.len())?
         );
         Ok(())
     }
-    
     #[test]
     fn test_delta() {
         check(Compression::Delta, &[&Entry { ts: 1, value: 10.0 }]).unwrap();
-        check(Compression::Delta, &[&Entry { ts: 1, value: 10.0 }, &Entry { ts: 2, value: 20.0 }]).unwrap();
+        check(
+            Compression::Delta,
+            &[&Entry { ts: 1, value: 10.0 }, &Entry { ts: 2, value: 20.0 }],
+        )
+        .unwrap();
         check(
             Compression::Delta,
             &[
                 &Entry { ts: 1, value: 10.0 },
                 &Entry { ts: 2, value: 20.0 },
-                &Entry { ts: 10, value: 30.0 },
+                &Entry {
+                    ts: 10,
+                    value: 30.0,
+                },
             ],
         )
         .unwrap();
@@ -153,6 +223,10 @@ mod test {
 
     #[test]
     fn test_deflate() {
-        check(Compression::Deflate, &[&Entry { ts: 1, value: 10.0 }, &Entry { ts: 2, value: 20.0 }]).unwrap();
+        check(
+            Compression::Deflate,
+            &[&Entry { ts: 1, value: 10.0 }, &Entry { ts: 2, value: 20.0 }],
+        )
+        .unwrap();
     }
 }

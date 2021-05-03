@@ -7,7 +7,7 @@ use super::entry::Entry;
 use super::file_system::{FileKind, OpenMode, SeriesDir};
 use super::index::{IndexReader, IndexWriter};
 use super::log::{LogEntry, LogReader, LogWriter};
-use super::utils::IntoEntriesIterator;
+use super::utils::{LowLevelEntriesIterator, IntoEntriesIterator, IntoLowLevelEntriesIterator};
 use super::Compression;
 
 #[derive(Copy, Clone)]
@@ -143,6 +143,31 @@ impl SeriesReader {
             buffer: VecDeque::new(),
         })
     }
+
+    #[allow(dead_code)]
+    pub fn low_level_iterator(&self, from_ts: u64) -> io::Result<SeriesLowLevelIterator> {
+        let last_log_entry = self.log_reader.get_last_entry_or_default()?;
+
+        let mut index_reader = IndexReader::create(
+            self.dir.open(FileKind::Index, OpenMode::Read)?,
+            last_log_entry.index_offset,
+        )?;
+
+        let start_offset = match index_reader.ceiling_offset(from_ts)? {
+            Some(offset) => offset,
+            _ => last_log_entry.data_offset,
+        };
+
+        Ok(SeriesLowLevelIterator {
+            data_reader: DataReader::create(
+                self.dir.open(FileKind::Data, OpenMode::Read)?,
+                start_offset,
+            )?,
+            offset: start_offset,
+            size: last_log_entry.data_offset,
+            from_ts,
+        })
+    }
 }
 
 pub struct SeriesIterator {
@@ -173,6 +198,48 @@ impl SeriesIterator {
     }
 }
 
+pub struct SeriesLowLevelIterator {
+    data_reader: DataReader,
+    offset: u64,
+    size: u64,
+    from_ts: u64,
+}
+
+impl SeriesLowLevelIterator {
+    fn read_next(&mut self, ts: &mut [u64], values: &mut [f64]) -> io::Result<usize> {
+        let mut matching_size = 0usize;
+
+        if self.offset < self.size {
+            let (entries_count, next_offset) = self.data_reader.read_block_to_buf(ts, values)?;
+
+            for i in 0..entries_count {
+                if ts[i] >= self.from_ts {
+                    ts[matching_size] = ts[i];
+                    values[matching_size] = values[i];
+
+                    matching_size += 1
+                }
+            }
+
+            self.offset = next_offset;
+        }
+        Ok(matching_size)
+    }
+}
+
+impl LowLevelEntriesIterator for SeriesLowLevelIterator {
+    fn next(&mut self, ts: &mut [u64], values: &mut [f64]) -> io::Result<usize> {
+        self.read_next(ts, values)
+    }
+}
+
+impl IntoLowLevelEntriesIterator for Arc<SeriesReader> {
+    type Iter = SeriesLowLevelIterator;
+    fn into_low_level_iter(&self, from_ts: u64) -> io::Result<Self::Iter> {
+        self.low_level_iterator(from_ts)
+    }
+}
+
 impl Iterator for SeriesIterator {
     type Item = io::Result<Entry>;
 
@@ -187,6 +254,13 @@ impl Iterator for SeriesIterator {
             Some(entry) => Some(Ok(entry)),
             _ => None,
         }
+    }
+}
+
+impl IntoEntriesIterator for Arc<SeriesReader> {
+    type Iter = SeriesIterator;
+    fn into_iter(&self, from: u64) -> io::Result<Self::Iter> {
+        self.iterator(from)
     }
 }
 
@@ -225,13 +299,6 @@ impl SeriesWriterGuard {
     }
 }
 
-impl IntoEntriesIterator for Arc<SeriesReader> {
-    type Iter = SeriesIterator;
-    fn into_iter(&self, from: u64) -> io::Result<Self::Iter> {
-        self.iterator(from)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::super::file_system;
@@ -240,6 +307,46 @@ mod test {
 
     fn entry(ts: u64, value: f64) -> Entry {
         Entry { ts, value }
+    }
+
+    #[test]
+    fn test_low_level_itrator() {
+        let db_dir = create_temp_dir("test-base").unwrap();
+        let file_system = file_system::open(&db_dir.path).unwrap();
+        let series_dir = file_system.series("series1").unwrap();
+
+        {
+            let mut writer = SeriesWriter::create(series_dir.clone(), SyncMode::Never).unwrap();
+            writer.append(&vec![
+                entry(1, 10.0),
+                entry(2, 20.0),
+                entry(3, 30.0),
+            ], Compression::Delta).unwrap();
+
+            writer.append(&vec![
+                entry(4, 40.0),
+                entry(5, 50.0),
+                entry(6, 60.0),
+            ], Compression::Delta).unwrap();
+        }
+
+        {
+            let reader = SeriesReader::create(series_dir.clone()).unwrap();
+            let mut iter = reader.low_level_iterator(2).unwrap();
+
+            let mut ts = [0u64; 10];
+            let mut values = [0f64; 10];
+
+            assert_eq!(2, iter.read_next(&mut ts, &mut values).unwrap());
+            assert_eq!(&[2u64, 3u64][..], &ts[0..2]);
+            assert_eq!(&[20.0f64, 30.0f64][..], &values[0..2]);
+
+            assert_eq!(3, iter.read_next(&mut ts, &mut values).unwrap());
+            assert_eq!(&[4u64, 5u64, 6u64][..], &ts[0..3]);
+            assert_eq!(&[40.0f64, 50.0f64, 60.0f64][..], &values[0..3]);
+
+            assert_eq!(0, iter.read_next(&mut ts, &mut values).unwrap());
+        }
     }
 
     #[test]

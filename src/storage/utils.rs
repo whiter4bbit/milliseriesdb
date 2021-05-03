@@ -32,3 +32,12 @@ impl IntoEntriesIterator for Vec<Entry> {
         Ok(iter)
     }
 }
+
+pub trait LowLevelEntriesIterator {
+    fn next(&mut self, ts: &mut [u64], values: &mut [f64]) -> io::Result<usize>;
+}
+
+pub trait IntoLowLevelEntriesIterator {
+    type Iter: LowLevelEntriesIterator;
+    fn into_low_level_iter(&self, from_ts: u64) -> io::Result<Self::Iter>;
+}

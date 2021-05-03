@@ -142,6 +142,18 @@ impl DataReader {
         
         Ok((entries, self.offset))
     }
+
+    pub fn read_block_to_buf(&mut self, ts: &mut [u64], values: &mut [f64]) -> io::Result<(usize, u64)> {
+        let header = BlockHeader::read(&mut self.file)?;
+        let mut payload = self.file.by_ref().take(header.payload_size as u64);
+
+        let compression = header.compression;
+        compression.read_to_buf(&mut payload, ts, values, header.entries_count)?;
+
+        self.offset += header.payload_size as u64 + BLOCK_HEADER_SIZE;
+        
+        Ok((header.entries_count, self.offset))
+    }
 }
 
 #[cfg(test)]
