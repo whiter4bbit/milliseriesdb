@@ -67,14 +67,14 @@ async fn main() {
             },
         )
         .unwrap(),
-                ("query", Some(sub_match)) => {
-                        query::query(series_table, sub_match.value_of("series").unwrap(), StatementExpr {
-                            from: sub_match.value_of("from").unwrap().to_string(),
-                            group_by: sub_match.value_of("groupby").unwrap().to_string(),
-                            aggregators: sub_match.value_of("aggregators").unwrap().to_string(),
-                            limit: sub_match.value_of("limit").unwrap().to_string(),
-                        }).unwrap()
-                    }                    
+        ("query", Some(sub_match)) => {
+            query::query(series_table, sub_match.value_of("series").unwrap(), StatementExpr {
+                from: sub_match.value_of("from").unwrap().to_string(),
+                group_by: sub_match.value_of("groupby").unwrap().to_string(),
+                aggregators: sub_match.value_of("aggregators").unwrap().to_string(),
+                limit: sub_match.value_of("limit").unwrap().to_string(),
+            }).unwrap()
+        }                    
         ("export", Some(sub_match)) => {
             export::export(
                 series_table,
