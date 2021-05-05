@@ -2,7 +2,7 @@ use crc::crc32::{self, Hasher32};
 use std::fs::File;
 use std::hash::Hasher;
 use std::io::prelude::*;
-use std::io::{self, BufReader, Cursor, SeekFrom};
+use std::io::{self, Cursor, SeekFrom};
 
 use super::compression::Compression;
 use super::entry::Entry;
@@ -114,15 +114,21 @@ impl DataWriter {
     }
 }
 
-pub struct DataReader {
-    file: BufReader<File>,
+pub struct BufDataReader {
+    file: File,
+    buf: Vec<u8>,
+    buf_pos: usize,
+    buf_len: usize,
     offset: u64,
 }
 
-impl DataReader {
-    pub fn create(file: File, start_offset: u64) -> io::Result<DataReader> {
-        let mut reader = DataReader {
-            file: BufReader::with_capacity(2 * 1024 * 1024, file),
+impl BufDataReader {
+    pub fn create(file: File, start_offset: u64) -> io::Result<BufDataReader> {
+        let mut reader = BufDataReader {
+            file: file,
+            buf: vec![0u8; 5 * 1024 * 1024],
+            buf_pos: 0,
+            buf_len: 0,
             offset: start_offset,
         };
 
@@ -131,15 +137,51 @@ impl DataReader {
         Ok(reader)
     }
 
+    fn refill(&mut self) -> io::Result<()> {
+        self.file.seek(SeekFrom::Start(self.offset))?;
+
+        self.buf_pos = 0;
+        self.buf_len = 0;
+
+        while self.buf_len < self.buf.len() {
+            let read = self.file.read(&mut self.buf[self.buf_len..])?;
+
+            if read == 0 {
+                break
+            }
+
+            self.buf_len += read;
+        }
+
+        Ok(())
+    }
+
     pub fn read_block(&mut self) -> io::Result<(Vec<Entry>, u64)> {
-        let header = BlockHeader::read(&mut self.file)?;
-        let mut payload = self.file.by_ref().take(header.payload_size as u64);
+        if self.buf_len - self.buf_pos < BLOCK_HEADER_SIZE as usize {
+            self.refill()?;
+        }
+
+        let header = BlockHeader::read(&mut &self.buf[self.buf_pos..])?;
+
+        self.buf_pos += BLOCK_HEADER_SIZE as usize;
+
+        if self.buf_len - self.buf_pos < header.payload_size {
+            self.refill()?;
+
+            self.buf_pos += BLOCK_HEADER_SIZE as usize;
+        }
 
         let compression = header.compression;
-        let entries = compression.read(&mut payload, header.entries_count)?;
+
+        let entries = compression.read(
+            &mut &self.buf[self.buf_pos..self.buf_pos + header.payload_size],
+            header.entries_count,
+        )?;
+
+        self.buf_pos += header.payload_size;
 
         self.offset += header.payload_size as u64 + BLOCK_HEADER_SIZE;
-        
+
         Ok((entries, self.offset))
     }
 }
@@ -149,6 +191,7 @@ mod test {
     use super::super::file_system::{self, FileKind, OpenMode};
     use super::super::test_utils::create_temp_dir;
     use super::*;
+
     #[test]
     fn test_read_write() {
         let db_dir = create_temp_dir("test-path").unwrap();
@@ -172,7 +215,7 @@ mod test {
 
         {
             let file = series_dir.open(FileKind::Data, OpenMode::Read).unwrap();
-            let mut reader = DataReader::create(file, 0).unwrap();
+            let mut reader = BufDataReader::create(file, 0).unwrap();
 
             let (result, _) = reader.read_block().unwrap();
             assert_eq!(entries[0..3].to_owned(), result);

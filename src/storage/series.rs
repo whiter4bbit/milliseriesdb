@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use super::data::{DataReader, DataWriter};
+use super::data::{BufDataReader, DataWriter};
 use super::entry::Entry;
 use super::file_system::{FileKind, OpenMode, SeriesDir};
 use super::index::{IndexReader, IndexWriter};
@@ -133,7 +133,7 @@ impl SeriesReader {
         };
 
         Ok(SeriesIterator {
-            data_reader: DataReader::create(
+            data_reader: BufDataReader::create(
                 self.dir.open(FileKind::Data, OpenMode::Read)?,
                 start_offset,
             )?,
@@ -146,7 +146,7 @@ impl SeriesReader {
 }
 
 pub struct SeriesIterator {
-    data_reader: DataReader,
+    data_reader: BufDataReader,
     offset: u64,
     size: u64,
     from_ts: u64,
