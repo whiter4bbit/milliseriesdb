@@ -3,8 +3,9 @@ use super::Entry;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use flate2::Compression as DeflateCompression;
-use integer_encoding::{VarIntReader, VarIntWriter};
-use std::io::{self, Read, Write};
+use integer_encoding::{VarIntWriter, VarInt};
+use std::io::{self, Write, Cursor};
+use std::convert::TryInto;
 
 #[derive(Clone)]
 pub enum Compression {
@@ -45,27 +46,40 @@ fn write_deflate<W: Write>(block: &[&Entry], to: &mut W) -> io::Result<()> {
     Ok(())
 }
 
-fn read_raw<R: Read>(from: &mut R, size: usize) -> io::Result<Vec<Entry>> {
+fn read_raw(from: &[u8], size: usize) -> io::Result<Vec<Entry>> {
+    let mut cursor = Cursor::new(from);
     let mut entries = Vec::new();
     for _ in 0..size {
         entries.push(Entry {
-            ts: from.read_u64()?,
-            value: from.read_f64()?,
+            ts: cursor.read_u64()?,
+            value: cursor.read_f64()?,
         });
     }
     Ok(entries)
 }
 
-fn read_deflate<R: Read>(from: &mut R, size: usize) -> io::Result<Vec<Entry>> {
+fn read_deflate(from: &[u8], size: usize) -> io::Result<Vec<Entry>> {
     let mut decoder = DeflateDecoder::new(from);
-    read_raw(&mut decoder, size)
+    let mut entries = Vec::new();
+    for _ in 0..size {
+        entries.push(Entry {
+            ts: decoder.read_u64()?,
+            value: decoder.read_f64()?,
+        });
+    }
+    Ok(entries)
 }
 
-fn read_delta<R: Read>(from: &mut R, size: usize) -> io::Result<Vec<Entry>> {
-    let mut entries = Vec::new();
+fn read_delta(from: &[u8], size: usize) -> io::Result<Vec<Entry>> {
+    let mut entries = Vec::with_capacity(size);
 
-    let mut last_ts = from.read_u64()?;
-    let mut last_val = from.read_f64()?;
+    let mut offset = 0usize;
+
+    let mut last_ts = u64::from_be_bytes(from[..8].try_into().unwrap());
+    offset += 8;
+
+    let mut last_val = f64::from_be_bytes(from[offset..offset+8].try_into().unwrap());
+    offset += 8;
 
     entries.push(Entry {
         ts: last_ts,
@@ -73,8 +87,14 @@ fn read_delta<R: Read>(from: &mut R, size: usize) -> io::Result<Vec<Entry>> {
     });
 
     for _ in 1..size {
-        last_ts += from.read_varint::<u64>()?;
-        last_val = f64::from_bits(last_val.to_bits() ^ from.read_varint::<u64>()?);
+        let (cur_ts, shift) = u64::decode_var(&from[offset..]).unwrap();
+        offset += shift;
+
+        let (cur_val_mask, shift) = u64::decode_var(&from[offset..]).unwrap();
+        offset += shift;
+
+        last_ts += cur_ts;
+        last_val = f64::from_bits(last_val.to_bits() ^ cur_val_mask);
 
         entries.push(Entry {
             ts: last_ts,
@@ -111,11 +131,11 @@ impl Compression {
         }
     }
 
-    pub fn read<R: Read>(&self, from: &mut R, size: usize) -> io::Result<Vec<Entry>> {
+    pub fn read(&self, from: &[u8], size: usize) -> io::Result<Vec<Entry>> {
         match self {
-            Compression::None => read_raw(from, size),
-            Compression::Deflate => read_deflate(from, size),
-            Compression::Delta => read_delta(from, size),
+            Compression::None => read_raw(&from, size),
+            Compression::Deflate => read_deflate(&from, size),
+            Compression::Delta => read_delta(&from, size),
         }
     }
 }
@@ -131,7 +151,7 @@ mod test {
         cursor.set_position(0);
         assert_eq!(
             entries.into_iter().cloned().cloned().collect::<Vec<Entry>>(),
-            compression.read(&mut cursor, entries.len())?
+            compression.read(cursor.get_ref(), entries.len())?
         );
         Ok(())
     }

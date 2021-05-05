@@ -1,10 +1,12 @@
 use clap::clap_app;
 use milliseriesdb::storage::{file_system, series_table, Compression, SyncMode};
+use milliseriesdb::query::StatementExpr;
 use std::sync::Arc;
 
 mod append;
 mod export;
 mod server;
+mod query;
 
 #[tokio::main]
 async fn main() {
@@ -30,6 +32,14 @@ async fn main() {
             (@arg csv: -c <CSV> --csv "path to destination csv (timestamp; value)")
             (@arg from: -f <FROM> --from "start timestamp")
         )
+        (@subcommand query =>
+            (about: "execute query on series")
+            (@arg series: -s <SERIES> --series "name of the series")
+            (@arg from: -f <FROM> --from "start timestamp expression")
+            (@arg groupby: -g <GROUPBY> --groupby "group by")
+            (@arg aggregators: -m <AGGREGATORS> --aggregators "aggregators")
+            (@arg limit: -l <LIMIT> --limit "entries limit")
+        )            
         (@subcommand server =>
             (about: "start the server")
             (@arg addr: -a <ADDR> --addr default_value("127.0.0.1:8080") "listen address, like 0.0.0.0:8080")
@@ -57,6 +67,14 @@ async fn main() {
             },
         )
         .unwrap(),
+                ("query", Some(sub_match)) => {
+                        query::query(series_table, sub_match.value_of("series").unwrap(), StatementExpr {
+                            from: sub_match.value_of("from").unwrap().to_string(),
+                            group_by: sub_match.value_of("groupby").unwrap().to_string(),
+                            aggregators: sub_match.value_of("aggregators").unwrap().to_string(),
+                            limit: sub_match.value_of("limit").unwrap().to_string(),
+                        }).unwrap()
+                    }                    
         ("export", Some(sub_match)) => {
             export::export(
                 series_table,
