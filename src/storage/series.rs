@@ -158,7 +158,7 @@ impl SeriesIterator {
         if self.offset < self.size {
             let (entries, offset) = self.data_reader.read_block()?;
             self.offset = offset;
-            self.buffer.extend(entries);
+            self.buffer = entries.into();
 
             while self
                 .buffer
