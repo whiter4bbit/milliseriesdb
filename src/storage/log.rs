@@ -1,10 +1,9 @@
-use crc::crc32::{self, Hasher32};
+use crc::crc32;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, BufReader};
 use std::sync::Arc;
-use std::hash::Hasher;
 
 use super::file_system::{FileKind, OpenMode, SeriesDir};
 use super::io_utils::{ReadBytes, WriteBytes};
@@ -25,40 +24,37 @@ const ZERO_ENTRY: LogEntry = LogEntry {
     highest_ts: 0,
 };
 
-fn entry_checksum(data_offset: u64, index_offset: u64, highest_ts: u64) -> u32 {
-    let mut digest = crc32::Digest::new(crc32::IEEE);
-    digest.write_u64(data_offset);
-    digest.write_u64(index_offset);
-    digest.write_u64(highest_ts);
-    digest.sum32()
-}
-
 impl LogEntry {
-    fn read_entry<R: Read>(read: &mut R) -> io::Result<LogEntry> {
-        let data_offset = read.read_u64()?;
-        let index_offset = read.read_u64()?;
-        let highest_ts = read.read_u64()?;
-        let target_checksum = read.read_u32()?;
-        let actual_checksum = entry_checksum(data_offset, index_offset, highest_ts);
+    fn checksum(&self) -> u32 {
+        let table = &crc32::IEEE_TABLE;
+        let mut checksum = 0u32;
 
-        match target_checksum == actual_checksum {
-            true => Ok(LogEntry {
-                data_offset,
-                index_offset,
-                highest_ts,
-            }),
-            _ => Err(io::Error::new(io::ErrorKind::InvalidData, "crc32 mismatch")),
+        checksum = crc32::update(checksum, table, &self.data_offset.to_le_bytes());
+        checksum = crc32::update(checksum, table, &self.index_offset.to_le_bytes());
+        checksum = crc32::update(checksum, table, &self.highest_ts.to_le_bytes());
+
+        checksum
+    }
+    fn read_entry<R: Read>(read: &mut R) -> io::Result<LogEntry> {
+        let entry = LogEntry {
+            data_offset: read.read_u64()?,
+            index_offset: read.read_u64()?,
+            highest_ts: read.read_u64()?,
+        };
+
+        let checksum = read.read_u32()?;
+
+        if checksum != entry.checksum() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "crc32 mismatch"));
         }
+
+        Ok(entry)
     }
     fn write_entry<W: Write>(&self, write: &mut W) -> io::Result<()> {
         write.write_u64(&self.data_offset)?;
         write.write_u64(&self.index_offset)?;
         write.write_u64(&self.highest_ts)?;
-        write.write_u32(&entry_checksum(
-            self.data_offset,
-            self.index_offset,
-            self.highest_ts,
-        ))?;
+        write.write_u32(&self.checksum())?;
         Ok(())
     }
 }

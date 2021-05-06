@@ -1,63 +1,65 @@
-use crc::crc32::{self, Hasher32};
+use crc::crc32;
 use std::fs::File;
-use std::hash::Hasher;
 use std::io::prelude::*;
 use std::io::{self, Cursor, SeekFrom};
+use std::convert::TryInto;
 
 use super::compression::Compression;
 use super::entry::Entry;
-use super::io_utils::{ReadBytes, WriteBytes};
+use super::io_utils::WriteBytes;
 
 const BLOCK_HEADER_SIZE: u64 = 4 + 1 + 4 + 4;
 
 struct BlockHeader {
-    entries_count: usize,
+    entries_count: u32,
     compression: Compression,
-    payload_size: usize,
-}
-
-fn header_checksum(entries_count: usize, compression: &Compression, payload_size: usize) -> u32 {
-    let mut digest = crc32::Digest::new(crc32::IEEE);
-    digest.write_usize(entries_count);
-    digest.write_u8(compression.marker());
-    digest.write_usize(payload_size);
-    digest.sum32()
+    payload_size: u32,
 }
 
 impl BlockHeader {
-    fn read<R: Read>(file: &mut R) -> io::Result<BlockHeader> {
-        let entries_count = file.read_u32()? as usize;
-        let compr_marker = file.read_u8()?;
-        let compression = match Compression::from_marker(compr_marker) {
-            Some(compression) => compression,
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Unknown compression format: {}", compr_marker),
-                ))
-            }
-        };
-        let payload_size = file.read_u32()? as usize;
-        let target_checksum = file.read_u32()?;
-        let checksum = header_checksum(entries_count, &compression, payload_size);
+    fn checksum(&self) -> u32 {
+        let table = &crc32::IEEE_TABLE;
+        let mut checksum = 0u32;
 
-        if target_checksum != checksum {
+        checksum = crc32::update(checksum, table, &(self.entries_count as u64).to_le_bytes());
+        checksum = crc32::update(checksum, table, &[self.compression.marker()]);
+        checksum = crc32::update(checksum, table, &(self.payload_size as u64).to_le_bytes());
+
+        checksum
+    }
+    fn read(bytes: &[u8]) -> io::Result<BlockHeader> {
+        let header = BlockHeader {
+            entries_count: u32::from_be_bytes(bytes[..4].try_into().unwrap()),
+            compression: {
+                let marker = bytes[4];
+
+                match Compression::from_marker(marker) {
+                    Some(compression) => compression,
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("Unknown compression format: {}", marker),
+                        ))
+                    }
+                }
+            },
+            payload_size: u32::from_be_bytes(bytes[5..9].try_into().unwrap()),
+        };
+
+        let checksum = u32::from_be_bytes(bytes[9..13].try_into().unwrap());
+
+        if checksum != header.checksum() {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "crc32 mismatch"));
         }
 
-        Ok(BlockHeader {
-            entries_count,
-            compression,
-            payload_size,
-        })
+        Ok(header)
     }
     fn write(&self, file: &mut File) -> io::Result<()> {
-        file.write_u32(&(self.entries_count as u32))?;
+        file.write_u32(&self.entries_count)?;
         file.write_u8(&(self.compression.marker()))?;
-        file.write_u32(&(self.payload_size as u32))?;
+        file.write_u32(&self.payload_size)?;
 
-        let checksum = header_checksum(self.entries_count, &self.compression, self.payload_size);
-        file.write_u32(&checksum)?;
+        file.write_u32(&self.checksum())?;
         Ok(())
     }
 }
@@ -94,9 +96,9 @@ impl DataWriter {
         let block_size = self.buffer.position();
 
         let block_header = BlockHeader {
-            entries_count: entries.len(),
+            entries_count: entries.len() as u32,
             compression,
-            payload_size: block_size as usize,
+            payload_size: block_size as u32,
         };
 
         block_header.write(&mut self.file)?;
@@ -114,7 +116,7 @@ impl DataWriter {
     }
 }
 
-pub struct BufDataReader {
+pub struct DataReader {
     file: File,
     buf: Vec<u8>,
     buf_pos: usize,
@@ -122,9 +124,9 @@ pub struct BufDataReader {
     offset: u64,
 }
 
-impl BufDataReader {
-    pub fn create(file: File, start_offset: u64) -> io::Result<BufDataReader> {
-        let mut reader = BufDataReader {
+impl DataReader {
+    pub fn create(file: File, start_offset: u64) -> io::Result<DataReader> {
+        let mut reader = DataReader {
             file: file,
             buf: vec![0u8; 5 * 1024 * 1024],
             buf_pos: 0,
@@ -147,7 +149,7 @@ impl BufDataReader {
             let read = self.file.read(&mut self.buf[self.buf_len..])?;
 
             if read == 0 {
-                break
+                break;
             }
 
             self.buf_len += read;
@@ -161,11 +163,13 @@ impl BufDataReader {
             self.refill()?;
         }
 
-        let header = BlockHeader::read(&mut &self.buf[self.buf_pos..])?;
+        let header = BlockHeader::read(&self.buf[self.buf_pos..])?;
 
         self.buf_pos += BLOCK_HEADER_SIZE as usize;
 
-        if self.buf_len - self.buf_pos < header.payload_size {
+        let payload_size = header.payload_size as usize;
+
+        if self.buf_len - self.buf_pos < payload_size {
             self.refill()?;
 
             self.buf_pos += BLOCK_HEADER_SIZE as usize;
@@ -174,11 +178,11 @@ impl BufDataReader {
         let compression = header.compression;
 
         let entries = compression.read(
-            &mut &self.buf[self.buf_pos..self.buf_pos + header.payload_size],
-            header.entries_count,
+            &self.buf[self.buf_pos..self.buf_pos + payload_size],
+            header.entries_count as usize,
         )?;
 
-        self.buf_pos += header.payload_size;
+        self.buf_pos += payload_size;
 
         self.offset += header.payload_size as u64 + BLOCK_HEADER_SIZE;
 
@@ -215,7 +219,7 @@ mod test {
 
         {
             let file = series_dir.open(FileKind::Data, OpenMode::Read).unwrap();
-            let mut reader = BufDataReader::create(file, 0).unwrap();
+            let mut reader = DataReader::create(file, 0).unwrap();
 
             let (result, _) = reader.read_block().unwrap();
             assert_eq!(entries[0..3].to_owned(), result);
