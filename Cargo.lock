@@ -542,6 +542,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "stderrlog",
+ "strength_reduce",
  "tokio",
  "warp",
 ]
@@ -994,6 +995,12 @@ dependencies = [
  "termcolor",
  "thread_local",
 ]
+
+[[package]]
+name = "strength_reduce"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3ff2f71c82567c565ba4b3009a9350a96a7269eaa4001ebedae926230bc2254"
 
 [[package]]
 name = "strsim"
