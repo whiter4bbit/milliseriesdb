@@ -40,7 +40,10 @@ impl FromStr for FromTimestamp {
 fn test_timestamp_from_str() {
     assert_eq!(FromTimestamp(1234), "1234".parse().unwrap());
 
-    println!("{:?}", Utc.datetime_from_str("2020-07-16 10:00", "%F %H:%M"));
+    println!(
+        "{:?}",
+        Utc.datetime_from_str("2020-07-16 10:00", "%F %H:%M")
+    );
 }
 
 struct GroupByMillis(u64);
@@ -64,6 +67,8 @@ impl FromStr for Aggregator {
     fn from_str(s: &str) -> Result<Aggregator, Self::Err> {
         match s {
             "mean" => Ok(Aggregator::Mean),
+            "min" => Ok(Aggregator::Min),
+            "max" => Ok(Aggregator::Max),
             _ => Err(()),
         }
     }
@@ -98,7 +103,7 @@ mod tests {
         let expr = StatementExpr {
             from: "10".to_string(),
             group_by: "hour".to_string(),
-            aggregators: "mean".to_string(),
+            aggregators: "mean,min,max,min".to_string(),
             limit: "1000".to_string(),
         };
 
@@ -106,7 +111,12 @@ mod tests {
             Statement {
                 from: 10,
                 group_by: 60 * 60 * 1000,
-                aggregators: vec![Aggregator::Mean],
+                aggregators: vec![
+                    Aggregator::Mean,
+                    Aggregator::Min,
+                    Aggregator::Max,
+                    Aggregator::Min
+                ],
                 limit: 1000,
             },
             Statement::try_from(expr).unwrap()

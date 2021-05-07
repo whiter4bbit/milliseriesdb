@@ -1,22 +1,33 @@
 mod aggregation;
 mod statement;
 mod statement_expr;
+mod group_by;
 
-use crate::storage::{Entry, IntoEntriesIterator};
-pub use aggregation::Aggregation;
-use aggregation::AggregatorState;
+use crate::storage::IntoEntriesIterator;
+pub use aggregation::{Aggregation, AggregatorsFolder};
 use serde_derive::{Deserialize, Serialize};
 pub use statement::Statement;
 pub use statement_expr::StatementExpr;
 use std::io;
 use std::time::SystemTime;
 use strength_reduce::StrengthReducedU64;
+use group_by::GroupBy;
+use std::convert::From;
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Row {
     pub ts: u64,
     pub values: Vec<Aggregation>,
+}
+
+impl From<(u64, Vec<Aggregation>)> for Row {
+    fn from(row: (u64, Vec<Aggregation>)) -> Row {
+        Row {
+            ts: row.0,
+            values: row.1,
+        }
+    }
 }
 
 pub trait QueryBuilder {
@@ -41,33 +52,25 @@ where
     statement: Statement,
 }
 
-fn as_group_ts(ts: u64, group_by: u64) -> u64 {
-    (ts / group_by) * group_by
-}
-
 impl<I> Query<I>
 where
     I: IntoEntriesIterator,
 {
     pub fn rows(self) -> io::Result<Vec<Row>> {
+        let folder = AggregatorsFolder::new(&self.statement.aggregators);
+
         let group_by = &mut GroupBy {
             iterator: self.into_iterator.into_iter(self.statement.from)?,
-            folder: MeanFolder { count: 0, sum: 0.0 },
+            folder: folder,
             current: None,
-            group_by: self.statement.group_by,
             iterations: 0,
-            group_by_reduced: StrengthReducedU64::new(self.statement.group_by),
+            granularity: StrengthReducedU64::new(self.statement.group_by),
         };
 
         let start_ts = SystemTime::now();
 
         let rows = group_by
-            .map(|e| {
-                e.map(|(key, value)| Row {
-                    ts: key,
-                    values: vec![Aggregation::Mean(value)],
-                })
-            })
+            .map(|e| e.map(|e| e.into()))
             .take(self.statement.limit)
             .collect::<io::Result<Vec<Row>>>()?;
 
@@ -89,114 +92,6 @@ where
         tokio::task::spawn_blocking(move || self.rows())
             .await
             .unwrap()
-    }
-}
-
-trait Folder {
-    type Result;
-    fn fold(&mut self, value: f64);
-    fn result(&self) -> Self::Result;
-    fn clear(&mut self);
-}
-
-struct MeanFolder {
-    count: usize,
-    sum: f64,
-}
-
-impl Folder for MeanFolder {
-    type Result = f64;
-    fn fold(&mut self, value: f64) {
-        self.count += 1;
-        self.sum += value;
-    }
-    fn result(&self) -> f64 {
-        if self.count == 0 {
-            0.0
-        } else {
-            self.sum / self.count as f64
-        }
-    }
-    fn clear(&mut self) {
-        self.count = 0;
-        self.sum = 0.0;
-    }
-}
-
-struct GroupBy<I, F>
-where
-    I: Iterator<Item = io::Result<Entry>>,
-    F: Folder,
-{
-    iterator: I,
-    folder: F,
-    current: Option<Entry>,
-    group_by: u64,
-    iterations: usize,
-    group_by_reduced: StrengthReducedU64,
-}
-
-impl<I, F> GroupBy<I, F>
-where
-    I: Iterator<Item = io::Result<Entry>>,
-    F: Folder,
-{
-    fn next_row(&mut self) -> io::Result<Option<(u64, F::Result)>> {
-        let head = match self.current.take() {
-            Some(current) => Some(current),
-            _ => match self.iterator.next() {
-                Some(next) => {
-                    self.iterations += 1;
-
-                    Some(next?)
-                }
-                _ => None,
-            },
-        };
-
-        if let Some(head) = head {
-            let group_key = head.ts - (head.ts % self.group_by_reduced);
-
-            self.folder.fold(head.value);
-
-            while let Some(next) = self.iterator.next() {
-                self.iterations += 1;
-
-                let next = next?;
-
-                let next_key = next.ts - (next.ts % self.group_by_reduced);
-
-                if next_key != group_key {
-                    self.current = Some(next);
-
-                    let result = self.folder.result();
-
-                    self.folder.clear();
-
-                    return Ok(Some((group_key, result)));
-                }
-
-                self.folder.fold(next.value);
-            }
-            return Ok(Some((group_key, self.folder.result())));
-        }
-
-        Ok(None)
-    }
-}
-
-impl<I, F> Iterator for GroupBy<I, F>
-where
-    I: Iterator<Item = io::Result<Entry>>,
-    F: Folder,
-{
-    type Item = io::Result<(u64, F::Result)>;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.next_row() {
-            Ok(Some(row)) => Some(Ok(row)),
-            Ok(None) => None,
-            Err(error) => Some(Err(error)),
-        }
     }
 }
 
@@ -236,6 +131,7 @@ mod test {
             true,
             match result[0].values[0] {
                 Aggregation::Mean(value) => (value - 3.0).abs() <= 10e-6,
+                _ => false,
             }
         );
 
@@ -243,6 +139,7 @@ mod test {
             true,
             match result[1].values[0] {
                 Aggregation::Mean(value) => (value - 5.0).abs() <= 10e-6,
+                _ => false,
             }
         )
     }
