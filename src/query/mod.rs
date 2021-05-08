@@ -1,21 +1,33 @@
 mod aggregation;
 mod statement;
 mod statement_expr;
+mod group_by;
 
 use crate::storage::IntoEntriesIterator;
-pub use aggregation::Aggregation;
-use aggregation::AggregatorState;
+pub use aggregation::{Aggregation, AggregatorsFolder};
 use serde_derive::{Deserialize, Serialize};
 pub use statement::Statement;
 pub use statement_expr::StatementExpr;
 use std::io;
 use std::time::SystemTime;
+use strength_reduce::StrengthReducedU64;
+use group_by::GroupBy;
+use std::convert::From;
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Row {
     pub ts: u64,
     pub values: Vec<Aggregation>,
+}
+
+impl From<(u64, Vec<Aggregation>)> for Row {
+    fn from(row: (u64, Vec<Aggregation>)) -> Row {
+        Row {
+            ts: row.0,
+            values: row.1,
+        }
+    }
 }
 
 pub trait QueryBuilder {
@@ -40,63 +52,34 @@ where
     statement: Statement,
 }
 
-fn as_group_ts(ts: u64, group_by: u64) -> u64 {
-    (ts / group_by) * group_by
-}
-
 impl<I> Query<I>
 where
     I: IntoEntriesIterator,
 {
     pub fn rows(self) -> io::Result<Vec<Row>> {
+        let folder = AggregatorsFolder::new(&self.statement.aggregators);
+
+        let group_by = &mut GroupBy {
+            iterator: self.into_iterator.into_iter(self.statement.from)?,
+            folder: folder,
+            current: None,
+            iterations: 0,
+            granularity: StrengthReducedU64::new(self.statement.group_by),
+        };
+
         let start_ts = SystemTime::now();
-        let mut rows = Vec::new();
-        let mut scanned = 0usize;
-        let mut group_ts = 0u64;
-        let mut state: Vec<AggregatorState> = self
-            .statement
-            .aggregators
-            .iter()
-            .map(|aggregator| aggregator.default_state())
-            .collect();
-        let mut is_empty = true;
-        for entry in self
-            .into_iterator
-            .into_iter(self.statement.from)?
-        {
-            scanned += 1;
-            let entry = entry?;
-            let entry_group_ts = as_group_ts(entry.ts, self.statement.group_by);
-            if entry_group_ts == group_ts || is_empty {
-                state.iter_mut().for_each(|state| state.update(&entry));
-                group_ts = entry_group_ts;
-                is_empty = false;
-            } else {
-                let row = Row {
-                    ts: group_ts,
-                    values: state.iter_mut().map(|state| state.pop()).collect(),
-                };
-                state.iter_mut().for_each(|state| state.update(&entry));
-                group_ts = entry_group_ts;
-                rows.push(row);
-            }
 
-            if rows.len() >= self.statement.limit {
-                break;
-            }
-        }
+        let rows = group_by
+            .map(|e| e.map(|e| e.into()))
+            .take(self.statement.limit)
+            .collect::<io::Result<Vec<Row>>>()?;
 
-        if !is_empty && rows.len() < self.statement.limit {
-            rows.push(Row {
-                ts: group_ts,
-                values: state.iter_mut().map(|state| state.pop()).collect(),
-            })
-        }
         log::debug!(
             "Scanned {} entries in {}ms",
-            scanned,
+            group_by.iterations,
             start_ts.elapsed().unwrap().as_millis()
         );
+
         Ok(rows)
     }
 }
@@ -148,6 +131,7 @@ mod test {
             true,
             match result[0].values[0] {
                 Aggregation::Mean(value) => (value - 3.0).abs() <= 10e-6,
+                _ => false,
             }
         );
 
@@ -155,6 +139,7 @@ mod test {
             true,
             match result[1].values[0] {
                 Aggregation::Mean(value) => (value - 5.0).abs() <= 10e-6,
+                _ => false,
             }
         )
     }

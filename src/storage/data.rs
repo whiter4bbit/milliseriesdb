@@ -1,8 +1,8 @@
 use crc::crc32;
+use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, Cursor, SeekFrom};
-use std::convert::TryInto;
 
 use super::compression::Compression;
 use super::entry::Entry;
