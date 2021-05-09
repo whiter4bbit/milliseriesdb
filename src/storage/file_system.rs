@@ -73,9 +73,14 @@ impl FileSystem {
         let base_path = self.base_path.join("series").join(name.as_ref());
         fs::create_dir_all(&base_path)?;
 
-        Ok(Arc::new(SeriesDir {
-            base_path,
-        }))
+        Ok(Arc::new(SeriesDir { base_path }))
+    }
+
+    pub fn rename_series<S: AsRef<str>>(&self, src: S, dst: S) -> io::Result<()> {
+        let src_path = self.base_path.join("series").join(src.as_ref());
+        let dst_path = self.base_path.join("series").join(dst.as_ref());
+
+        fs::rename(src_path, dst_path)
     }
 
     pub fn get_series(&self) -> io::Result<Vec<String>> {

@@ -1,12 +1,16 @@
+use bytes::buf::Buf;
 use chrono::{TimeZone, Utc};
+use futures::{Stream, StreamExt};
 use hyper::body::{Body, Bytes, Sender};
+use milliseriesdb::csv;
 use milliseriesdb::query::{Aggregation, QueryBuilder, Row, Statement, StatementExpr};
-use milliseriesdb::storage::{Compression, Entry, SeriesReader, SeriesTable};
+use milliseriesdb::storage::{Compression, Entry, SeriesReader, SeriesTable, SeriesWriterGuard};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::{Infallible, TryFrom};
-use std::io;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
+use std::{io, time};
 use warp::{http::Response, http::StatusCode, Filter};
 
 mod restapi {
@@ -159,6 +163,64 @@ mod restapi {
                     .body(Body::empty()))
             })
     }
+
+    async fn import_entries<S, B>(body: S, writer: Arc<SeriesWriterGuard>) -> io::Result<()>
+    where
+        S: Stream<Item = Result<B, warp::Error>> + Send + 'static + Unpin,
+        B: Buf + Send,
+    {
+        let mut csv = csv::ChunkedReader::new();
+        let mut body = body.boxed();
+        while let Some(Ok(mut chunk)) = body.next().await {
+            let entries = &mut csv.read(&mut chunk);
+
+            loop {
+                let batch = entries
+                    .take(100)
+                    .collect::<Result<Vec<Entry>, ()>>()
+                    .map_err(|_| io::Error::new(io::ErrorKind::Other, "Can not read entries"))?;
+
+                if batch.is_empty() {
+                    break;
+                }
+
+                writer.append_async(batch, Compression::Delta).await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn restore<S, B>(
+        name: String,
+        series_table: Arc<SeriesTable>,
+        body: S,
+    ) -> Result<impl warp::Reply, Infallible>
+    where
+        S: Stream<Item = Result<B, warp::Error>> + Send + 'static + Unpin,
+        B: Buf + Send,
+    {
+        let series_name = match series_table.create_temp() {
+            Ok(series_name) => series_name,
+            Err(_) => return Ok(StatusCode::INTERNAL_SERVER_ERROR),
+        };
+
+        let writer = match series_table.writer(&series_name) {
+            Some(writer) => writer,
+            None => return Ok(StatusCode::INTERNAL_SERVER_ERROR),
+        };
+
+        if let Err(err) = restapi::import_entries(body, writer).await {
+            log::warn!("can not import series: {:?}", err);
+            return Ok(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+
+        if let Err(err) = series_table.rename(series_name, name) {
+            log::warn!("can not import series: {:?}", err);
+            return Ok(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+
+        Ok(StatusCode::OK)
+    }
 }
 
 pub async fn start_server(series_table: Arc<SeriesTable>, addr: SocketAddr) -> io::Result<()> {
@@ -184,10 +246,17 @@ pub async fn start_server(series_table: Arc<SeriesTable>, addr: SocketAddr) -> i
         .and(restapi::with_series_table(series_table.clone()))
         .and_then(restapi::export);
 
+    let restore_series = warp::path!("series" / String / "restore")
+        .and(warp::post())
+        .and(restapi::with_series_table(series_table.clone()))
+        .and(warp::body::stream())
+        .and_then(restapi::restore);
+
     let server_api = create_series
         .or(append_to_series)
         .or(query_series)
-        .or(export_series);
+        .or(export_series)
+        .or(restore_series);
 
     warp::serve(server_api).run(addr).await;
     Ok(())

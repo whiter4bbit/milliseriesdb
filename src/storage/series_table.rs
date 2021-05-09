@@ -1,8 +1,8 @@
 use super::file_system::FileSystem;
 use super::{SeriesReader, SeriesWriterGuard, SyncMode};
 use std::collections::HashMap;
-use std::io;
 use std::sync::{Arc, Mutex};
+use std::{io, time};
 
 struct TableEntry {
     writer: Arc<SeriesWriterGuard>,
@@ -50,6 +50,35 @@ impl SeriesTable {
         entries.insert(name.as_ref().to_owned(), Arc::new(entry));
 
         Ok(())
+    }
+    pub fn create_temp(&self) -> io::Result<String> {
+        let name = format!(
+            "restore-{}",
+            time::SystemTime::now()
+                .duration_since(time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        self.create(&name)?;
+        Ok(name)
+    }
+    pub fn rename<S: AsRef<str>>(&self, src: S, dst: S) -> io::Result<bool> {
+        let mut entries = self.entries.lock().unwrap();
+        
+        if !entries.contains_key(src.as_ref()) || entries.contains_key(dst.as_ref()) {
+            return Ok(false);
+        }
+
+        self.fs.rename_series(src.as_ref(), dst.as_ref())?;
+
+        {
+            entries.remove(src.as_ref());
+        }
+
+        let entry = TableEntry::open_or_create(&self.fs, dst.as_ref(), self.sync_mode)?;
+        entries.insert(dst.as_ref().to_owned(), Arc::new(entry));
+
+        Ok(false)
     }
 }
 
