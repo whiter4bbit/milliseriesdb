@@ -199,16 +199,8 @@ mod restapi {
         S: Stream<Item = Result<B, warp::Error>> + Send + 'static + Unpin,
         B: Buf + Send,
     {
-        let series_name = format!(
-            "restore-{}",
-            time::SystemTime::now()
-                .duration_since(time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        );
-
-        match series_table.create(&series_name) {
-            Ok(_) => (),
+        let series_name = match series_table.create_temp() {
+            Ok(series_name) => series_name,
             Err(_) => return Ok(StatusCode::INTERNAL_SERVER_ERROR),
         };
 
@@ -217,9 +209,16 @@ mod restapi {
             None => return Ok(StatusCode::INTERNAL_SERVER_ERROR),
         };
 
-        tokio::spawn(async move { restapi::import_entries(body, writer).await })
-            .await
-            .unwrap();
+        if let Err(err) = restapi::import_entries(body, writer).await {
+            log::warn!("can not import series: {:?}", err);
+            return Ok(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+
+        if let Err(err) = series_table.rename(series_name, name) {
+            log::warn!("can not import series: {:?}", err);
+            return Ok(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+
         Ok(StatusCode::OK)
     }
 }
