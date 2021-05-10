@@ -17,7 +17,7 @@ impl TableEntry {
         sync_mode: SyncMode,
     ) -> Result<TableEntry, Error> {
         Ok(TableEntry {
-            writer: Arc::new(SeriesWriterGuard::create(
+            writer: Arc::new(SeriesWriterGuard::create_opt(
                 fs.series(name.as_ref())?,
                 sync_mode,
             )?),

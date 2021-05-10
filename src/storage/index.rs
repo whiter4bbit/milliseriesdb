@@ -14,10 +14,7 @@ pub struct IndexWriter {
 
 impl IndexWriter {
     pub fn open(file: File, offset: u64) -> Result<IndexWriter, Error> {
-        let mut writer = IndexWriter {
-            offset,
-            file,
-        };
+        let mut writer = IndexWriter { offset, file };
         writer.file.seek(SeekFrom::Start(offset))?;
         Ok(writer)
     }
@@ -102,39 +99,33 @@ impl IndexReader {
 mod test {
     use super::super::file_system::{self, FileKind, OpenMode};
     use super::*;
-    use super::super::test_utils::create_temp_dir;
 
     #[test]
-    fn test_ceiling() {
-        let db_dir = create_temp_dir("test-dir").unwrap();
-        let fs = file_system::open(&db_dir.path).unwrap();
-        let series_dir = fs.series("series1").unwrap();
+    fn test_ceiling() -> Result<(), Error> {
+        let fs = &file_system::open_temp()?.fs;
+        let series_dir = fs.series("series1")?;
 
         let offset = {
-            let mut writer = IndexWriter::open(
-                series_dir.open(FileKind::Index, OpenMode::Write).unwrap(),
-                0,
-            )
-            .unwrap();
+            let file = series_dir.open(FileKind::Index, OpenMode::Write)?;
+            let mut writer = IndexWriter::open(file, 0)?;
 
-            writer.append(1, 11).unwrap();
-            writer.append(4, 44).unwrap();
-            writer.append(9, 99).unwrap()
+            writer.append(1, 11)?;
+            writer.append(4, 44)?;
+            writer.append(9, 99)?
         };
 
         {
-            let mut reader = IndexReader::create(
-                series_dir.open(FileKind::Index, OpenMode::Read).unwrap(),
-                offset,
-            )
-            .unwrap();
+            let file = series_dir.open(FileKind::Index, OpenMode::Read)?;
+            let mut reader = IndexReader::create(file, offset)?;
 
-            assert_eq!(Some(11), reader.ceiling_offset(0).unwrap());
-            assert_eq!(Some(11), reader.ceiling_offset(1).unwrap());
-            assert_eq!(Some(44), reader.ceiling_offset(3).unwrap());
-            assert_eq!(Some(99), reader.ceiling_offset(5).unwrap());
-            assert_eq!(Some(99), reader.ceiling_offset(9).unwrap());
-            assert_eq!(None, reader.ceiling_offset(10).unwrap());
+            assert_eq!(Some(11), reader.ceiling_offset(0)?);
+            assert_eq!(Some(11), reader.ceiling_offset(1)?);
+            assert_eq!(Some(44), reader.ceiling_offset(3)?);
+            assert_eq!(Some(99), reader.ceiling_offset(5)?);
+            assert_eq!(Some(99), reader.ceiling_offset(9)?);
+            assert_eq!(None, reader.ceiling_offset(10)?);
         }
+
+        Ok(())
     }
 }

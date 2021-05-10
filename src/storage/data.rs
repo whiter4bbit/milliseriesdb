@@ -189,14 +189,12 @@ impl DataReader {
 #[cfg(test)]
 mod test {
     use super::super::file_system::{self, FileKind, OpenMode};
-    use super::super::test_utils::create_temp_dir;
     use super::*;
 
     #[test]
-    fn test_read_write() {
-        let db_dir = create_temp_dir("test-path").unwrap();
-        let fs = file_system::open(&db_dir.path).unwrap();
-        let series_dir = fs.series("series1").unwrap();
+    fn test_read_write() -> Result<(), Error>{
+        let fs = &file_system::open_temp()?.fs;
+        let series_dir = fs.series("series1")?;
 
         let entries = vec![
             Entry { ts: 1, value: 11.0 },
@@ -207,21 +205,23 @@ mod test {
         ];
 
         {
-            let file = series_dir.open(FileKind::Data, OpenMode::Write).unwrap();
-            let mut writer = DataWriter::create(file, 0).unwrap();
-            writer.append(&entries[0..3], Compression::Deflate).unwrap();
-            writer.append(&entries[3..5], Compression::Deflate).unwrap();
+            let file = series_dir.open(FileKind::Data, OpenMode::Write)?;
+            let mut writer = DataWriter::create(file, 0)?;
+            writer.append(&entries[0..3], Compression::Deflate)?;
+            writer.append(&entries[3..5], Compression::Deflate)?;
         }
 
         {
-            let file = series_dir.open(FileKind::Data, OpenMode::Read).unwrap();
-            let mut reader = DataReader::create(file, 0).unwrap();
+            let file = series_dir.open(FileKind::Data, OpenMode::Read)?;
+            let mut reader = DataReader::create(file, 0)?;
 
-            let (result, _) = reader.read_block().unwrap();
+            let (result, _) = reader.read_block()?;
             assert_eq!(entries[0..3].to_owned(), result);
 
-            let (result, _) = reader.read_block().unwrap();
+            let (result, _) = reader.read_block()?;
             assert_eq!(entries[3..5].to_owned(), result);
         }
+
+        Ok(())
     }
 }

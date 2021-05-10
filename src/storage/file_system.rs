@@ -1,7 +1,7 @@
+use super::error::Error;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use super::error::Error;
 
 pub enum FileKind {
     #[allow(dead_code)]
@@ -78,7 +78,7 @@ impl FileSystem {
         Ok(fs::rename(src_path, dst_path)?)
     }
 
-    pub fn get_series(&self) -> Result<Vec<String>,  Error> {
+    pub fn get_series(&self) -> Result<Vec<String>, Error> {
         let mut series = Vec::new();
         for entry in fs::read_dir(self.base_path.join("series"))? {
             let series_path = entry?.path().clone();
@@ -100,5 +100,37 @@ pub fn open<P: AsRef<Path>>(base_path: P) -> Result<FileSystem, Error> {
     fs::create_dir_all(base_path.as_ref().join("series"))?;
     Ok(FileSystem {
         base_path: base_path.as_ref().to_owned(),
+    })
+}
+
+#[cfg(test)]
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(test)]
+pub struct TempFS {
+    pub fs: FileSystem,
+    path: PathBuf,
+}
+
+#[cfg(test)]
+impl Drop for TempFS {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.path).unwrap();
+    }
+}
+
+#[cfg(test)]
+pub fn open_temp() -> Result<TempFS, Error> {
+    let path = PathBuf::from(format!(
+        "temp-dir-{:?}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+
+    Ok(TempFS {        
+        fs: open(&path)?,
+        path: path.clone(),
     })
 }

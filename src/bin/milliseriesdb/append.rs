@@ -40,12 +40,12 @@ pub fn append(
         let CsvEntry(ts, val) = entry?.parse::<CsvEntry>()?;
         buffer.push(Entry { ts, value: val });
         if buffer.len() == batch_size {
-            writer.append(&buffer, compression.clone())?;
+            writer.append_opt(&buffer, compression.clone())?;
             buffer.clear();
         }
     }
     if !buffer.is_empty() {
-        writer.append(&buffer, compression)?;
+        writer.append_opt(&buffer, compression)?;
     }
     Ok(())
 }

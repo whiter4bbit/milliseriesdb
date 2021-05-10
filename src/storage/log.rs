@@ -179,27 +179,28 @@ impl LogWriter {
 #[cfg(test)]
 mod test {
     use super::super::file_system;
-    use super::super::test_utils::create_temp_dir;
     use super::*;
     use std::io::{Cursor, SeekFrom};
 
     #[test]
-    fn test_log_entry_read_write() {
+    fn test_log_entry_read_write() -> Result<(), Error> {
         let mut cursor = Cursor::new(Vec::new());
+
         let entry = LogEntry {
             data_offset: 123 as u64,
             index_offset: 321 as u64,
             highest_ts: 110,
         };
+
         {
-            entry.write_entry(&mut cursor).unwrap();
+            entry.write_entry(&mut cursor)?;
             cursor.set_position(0);
         }
-        assert_eq!(entry, LogEntry::read_entry(&mut cursor).unwrap());
+        assert_eq!(entry, LogEntry::read_entry(&mut cursor)?);
 
         {
             cursor.set_position(0);
-            cursor.write(&[1, 2, 3]).unwrap();
+            cursor.write(&[1, 2, 3])?;
             cursor.set_position(0);
         }
         assert_eq!(
@@ -209,10 +210,11 @@ mod test {
                 _ => false,
             }
         );
+
         {
             cursor.set_position(0);
-            cursor.write_u64(&321).unwrap();
-            cursor.write_u64(&123).unwrap();
+            cursor.write_u64(&321)?;
+            cursor.write_u64(&123)?;
             cursor.set_position(0);
         }
         assert_eq!(
@@ -222,13 +224,14 @@ mod test {
                 _ => false,
             }
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_writer() {
-        let db_dir = create_temp_dir("test-path").unwrap();
-        let fs = file_system::open(&db_dir.path).unwrap();
-        let series_dir = fs.series("series1").unwrap();
+    fn test_writer() -> Result<(), Error> {
+        let fs = &file_system::open_temp()?.fs;
+        let series_dir = fs.series("series1")?;
 
         let entry1 = LogEntry {
             data_offset: 11,
@@ -261,38 +264,40 @@ mod test {
             highest_ts: 999,
         };
         {
-            let mut writer = LogWriter::create(series_dir.clone(), 1024).unwrap();
-            writer.append(&entry1).unwrap();
-            writer.append(&entry2).unwrap();
-            writer.append(&entry3).unwrap();
+            let mut writer = LogWriter::create(series_dir.clone(), 1024)?;
+            writer.append(&entry1)?;
+            writer.append(&entry2)?;
+            writer.append(&entry3)?;
         }
 
         {
             let reader = LogReader::create(series_dir.clone());
-            assert_eq!(entry3, reader.get_last_entry_or_default().unwrap());
+            assert_eq!(entry3, reader.get_last_entry_or_default()?);
         }
         {
-            let mut writer = LogWriter::create(series_dir.clone(), 1024).unwrap();
-            writer.append(&entry4).unwrap();
-            writer.append(&entry5).unwrap();
-            writer.append(&entry6).unwrap();
+            let mut writer = LogWriter::create(series_dir.clone(), 1024)?;
+            writer.append(&entry4)?;
+            writer.append(&entry5)?;
+            writer.append(&entry6)?;
         }
 
         {
             let reader = LogReader::create(series_dir.clone());
-            assert_eq!(entry6, reader.get_last_entry_or_default().unwrap());
+            assert_eq!(entry6, reader.get_last_entry_or_default()?);
         }
 
         {
-            let mut file = series_dir.open(FileKind::Log(1), OpenMode::Write).unwrap();
-            file.seek(SeekFrom::Start(LOG_ENTRY_SIZE + 1)).unwrap();
-            file.write_all(&[0, 1, 2, 3]).unwrap();
+            let mut file = series_dir.open(FileKind::Log(1), OpenMode::Write)?;
+            file.seek(SeekFrom::Start(LOG_ENTRY_SIZE + 1))?;
+            file.write_all(&[0, 1, 2, 3])?;
         }
 
         {
             let reader = LogReader::create(series_dir);
-            assert_eq!(entry4, reader.get_last_entry_or_default().unwrap());
+            assert_eq!(entry4, reader.get_last_entry_or_default()?);
         }
+
+        Ok(())
     }
 
     fn gen_entry(seq: u64) -> LogEntry {
@@ -304,17 +309,17 @@ mod test {
     }
 
     #[test]
-    fn test_rotate() {
-        let db_dir = create_temp_dir("test-path").unwrap();
-        let fs = file_system::open(&db_dir.path).unwrap();
-        let series_dir = fs.series("series1").unwrap();
+    fn test_rotate() -> Result<(), Error> {
+        let fs = &file_system::open_temp()?.fs;
+        let series_dir = fs.series("series1")?;
 
         {
-            let mut writer = LogWriter::create(series_dir.clone(), LOG_ENTRY_SIZE * 10).unwrap();
+            let mut writer = LogWriter::create(series_dir.clone(), LOG_ENTRY_SIZE * 10)?;
             for i in 1..=34 {
-                writer.append(&gen_entry(i as u64)).unwrap();
+                writer.append(&gen_entry(i as u64))?;
             }
         }
-        assert_eq!(vec![3, 2], series_dir.clone().read_log_sequences().unwrap());
+        assert_eq!(vec![3, 2], series_dir.clone().read_log_sequences()?);
+        Ok(())
     }
 }

@@ -1,16 +1,27 @@
-use super::Entry;
-use super::error::Error;
-use std::collections::VecDeque;
+use crate::storage::{error::Error, Entry, SeriesReader, SeriesIterator};
+use std::sync::Arc;
 
-pub trait IntoEntriesIterator {
+pub trait IntoEntriesIter {
     type Iter: Iterator<Item = Result<Entry, Error>>;
     fn into_iter(&self, from: u64) -> Result<Self::Iter, Error>;
 }
 
+impl IntoEntriesIter for Arc<SeriesReader> {
+    type Iter = SeriesIterator;
+    fn into_iter(&self, from: u64) -> Result<Self::Iter, Error> {
+        self.iterator(from)
+    }
+}
+
+#[cfg(test)]
+use std::collections::VecDeque;
+
+#[cfg(test)]
 pub struct VecIterator {
     deque: VecDeque<Entry>,
 }
 
+#[cfg(test)]
 impl Iterator for VecIterator {
     type Item = Result<Entry, Error>;
     fn next(&mut self) -> Option<Self::Item> {
@@ -18,7 +29,8 @@ impl Iterator for VecIterator {
     }
 }
 
-impl IntoEntriesIterator for Vec<Entry> {
+#[cfg(test)]
+impl IntoEntriesIter for Vec<Entry> {
     type Iter = VecIterator;
     fn into_iter(&self, from: u64) -> Result<Self::Iter, Error> {
         let mut iter = VecIterator {

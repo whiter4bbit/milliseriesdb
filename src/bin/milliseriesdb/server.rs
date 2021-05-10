@@ -4,12 +4,12 @@ use futures::{Stream, StreamExt};
 use hyper::body::{Body, Bytes, Sender};
 use milliseriesdb::csv;
 use milliseriesdb::query::{Aggregation, QueryBuilder, Row, Statement, StatementExpr};
-use milliseriesdb::storage::{error::Error, Compression, Entry, SeriesReader, SeriesTable, SeriesWriterGuard};
+use milliseriesdb::storage::{error::Error, Entry, SeriesReader, SeriesTable, SeriesWriterGuard};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::{Infallible, TryFrom};
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::io;
 use warp::{http::Response, http::StatusCode, Filter};
 
 mod restapi {
@@ -66,13 +66,10 @@ mod restapi {
         series_table: Arc<SeriesTable>,
     ) -> Result<impl warp::Reply, Infallible> {
         Ok(match series_table.writer(name) {
-            Some(writer) => {
-                let result = writer.append_async(entries.entries, Compression::Delta);
-                match result.await {
-                    Ok(()) => StatusCode::OK,
-                    _ => StatusCode::INTERNAL_SERVER_ERROR,
-                }
-            }
+            Some(writer) => match writer.append_async(entries.entries).await {
+                Ok(()) => StatusCode::OK,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            },
             _ => StatusCode::NOT_FOUND,
         })
     }
@@ -183,7 +180,7 @@ mod restapi {
                     break;
                 }
 
-                writer.append_async(batch, Compression::Delta).await?;
+                writer.append_async(batch).await?;
             }
         }
         Ok(())
@@ -215,13 +212,22 @@ mod restapi {
 
         match series_table.rename(&series_name, &name) {
             Ok(false) => {
-                log::warn!("can not restore series '{}' -> '{}', conflict", &series_name, &name);
+                log::warn!(
+                    "can not restore series '{}' -> '{}', conflict",
+                    &series_name,
+                    &name
+                );
                 return Ok(StatusCode::CONFLICT);
-            },
+            }
             Err(err) => {
-                log::warn!("can not restore series '{}' -> '{}': {:?}", &series_name, &name, err);
+                log::warn!(
+                    "can not restore series '{}' -> '{}': {:?}",
+                    &series_name,
+                    &name,
+                    err
+                );
                 return Ok(StatusCode::INTERNAL_SERVER_ERROR);
-            },
+            }
             _ => (),
         };
 

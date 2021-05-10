@@ -145,7 +145,7 @@ impl Compression {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::io::Cursor;
+    use std::io::{self, Cursor};
 
     fn check(compression: Compression, entries: &[&Entry]) -> io::Result<()> {
         let mut cursor = Cursor::new(Vec::new());
