@@ -7,6 +7,7 @@ use std::io::{self, Cursor, SeekFrom};
 use super::compression::Compression;
 use super::entry::Entry;
 use super::io_utils::WriteBytes;
+use super::error::Error;
 
 const BLOCK_HEADER_SIZE: u64 = 4 + 1 + 4 + 4;
 
@@ -27,29 +28,24 @@ impl BlockHeader {
 
         checksum
     }
-    fn read(bytes: &[u8]) -> io::Result<BlockHeader> {
+    fn read(bytes: &[u8]) -> Result<BlockHeader, Error> {
         let header = BlockHeader {
-            entries_count: u32::from_be_bytes(bytes[..4].try_into().unwrap()),
+            entries_count: u32::from_be_bytes(bytes[..4].try_into()?),
             compression: {
                 let marker = bytes[4];
 
                 match Compression::from_marker(marker) {
                     Some(compression) => compression,
-                    None => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("Unknown compression format: {}", marker),
-                        ))
-                    }
+                    None => return Err(Error::UnknownCompression),
                 }
             },
-            payload_size: u32::from_be_bytes(bytes[5..9].try_into().unwrap()),
+            payload_size: u32::from_be_bytes(bytes[5..9].try_into()?),
         };
 
-        let checksum = u32::from_be_bytes(bytes[9..13].try_into().unwrap());
+        let checksum = u32::from_be_bytes(bytes[9..13].try_into()?);
 
         if checksum != header.checksum() {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "crc32 mismatch"));
+            return Err(Error::Crc32Mismatch);
         }
 
         Ok(header)
@@ -125,7 +121,7 @@ pub struct DataReader {
 }
 
 impl DataReader {
-    pub fn create(file: File, start_offset: u64) -> io::Result<DataReader> {
+    pub fn create(file: File, start_offset: u64) -> Result<DataReader, Error> {
         let mut reader = DataReader {
             file: file,
             buf: vec![0u8; 5 * 1024 * 1024],
@@ -139,7 +135,7 @@ impl DataReader {
         Ok(reader)
     }
 
-    fn refill(&mut self) -> io::Result<()> {
+    fn refill(&mut self) -> Result<(), Error> {
         self.file.seek(SeekFrom::Start(self.offset))?;
 
         self.buf_pos = 0;
@@ -158,7 +154,7 @@ impl DataReader {
         Ok(())
     }
 
-    pub fn read_block(&mut self) -> io::Result<(Vec<Entry>, u64)> {
+    pub fn read_block(&mut self) -> Result<(Vec<Entry>, u64), Error> {
         if self.buf_len - self.buf_pos < BLOCK_HEADER_SIZE as usize {
             self.refill()?;
         }

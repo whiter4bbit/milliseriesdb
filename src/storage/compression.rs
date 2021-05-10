@@ -1,11 +1,12 @@
+use super::error::Error;
 use super::io_utils::{ReadBytes, WriteBytes};
 use super::Entry;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use flate2::Compression as DeflateCompression;
-use integer_encoding::{VarIntWriter, VarInt};
-use std::io::{self, Write, Cursor};
+use integer_encoding::{VarInt, VarIntWriter};
 use std::convert::TryInto;
+use std::io::{Cursor, Write};
 
 #[derive(Clone)]
 pub enum Compression {
@@ -14,7 +15,7 @@ pub enum Compression {
     Delta,
 }
 
-fn write_delta<W: Write>(block: &[&Entry], to: &mut W) -> io::Result<()> {
+fn write_delta<W: Write>(block: &[&Entry], to: &mut W) -> Result<(), Error> {
     let mut last_ts = block[0].ts;
     let mut last_val = block[0].value;
 
@@ -31,7 +32,7 @@ fn write_delta<W: Write>(block: &[&Entry], to: &mut W) -> io::Result<()> {
     Ok(())
 }
 
-fn write_raw<W: Write>(block: &[&Entry], to: &mut W) -> io::Result<()> {
+fn write_raw<W: Write>(block: &[&Entry], to: &mut W) -> Result<(), Error> {
     for entry in block {
         to.write_u64(&entry.ts)?;
         to.write_f64(&entry.value)?;
@@ -39,14 +40,14 @@ fn write_raw<W: Write>(block: &[&Entry], to: &mut W) -> io::Result<()> {
     Ok(())
 }
 
-fn write_deflate<W: Write>(block: &[&Entry], to: &mut W) -> io::Result<()> {
+fn write_deflate<W: Write>(block: &[&Entry], to: &mut W) -> Result<(), Error> {
     let mut encoder = DeflateEncoder::new(to, DeflateCompression::default());
     write_raw(block, &mut encoder)?;
     encoder.finish()?;
     Ok(())
 }
 
-fn read_raw(from: &[u8], size: usize) -> io::Result<Vec<Entry>> {
+fn read_raw(from: &[u8], size: usize) -> Result<Vec<Entry>, Error> {
     let mut cursor = Cursor::new(from);
     let mut entries = Vec::new();
     for _ in 0..size {
@@ -58,7 +59,7 @@ fn read_raw(from: &[u8], size: usize) -> io::Result<Vec<Entry>> {
     Ok(entries)
 }
 
-fn read_deflate(from: &[u8], size: usize) -> io::Result<Vec<Entry>> {
+fn read_deflate(from: &[u8], size: usize) -> Result<Vec<Entry>, Error> {
     let mut decoder = DeflateDecoder::new(from);
     let mut entries = Vec::new();
     for _ in 0..size {
@@ -70,15 +71,15 @@ fn read_deflate(from: &[u8], size: usize) -> io::Result<Vec<Entry>> {
     Ok(entries)
 }
 
-fn read_delta(from: &[u8], size: usize) -> io::Result<Vec<Entry>> {
+fn read_delta(from: &[u8], size: usize) -> Result<Vec<Entry>, Error> {
     let mut entries = Vec::with_capacity(size);
 
     let mut offset = 0usize;
 
-    let mut last_ts = u64::from_be_bytes(from[..8].try_into().unwrap());
+    let mut last_ts = u64::from_be_bytes(from[..8].try_into()?);
     offset += 8;
 
-    let mut last_val = f64::from_be_bytes(from[offset..offset+8].try_into().unwrap());
+    let mut last_val = f64::from_be_bytes(from[offset..offset + 8].try_into()?);
     offset += 8;
 
     entries.push(Entry {
@@ -87,10 +88,11 @@ fn read_delta(from: &[u8], size: usize) -> io::Result<Vec<Entry>> {
     });
 
     for _ in 1..size {
-        let (cur_ts, shift) = u64::decode_var(&from[offset..]).unwrap();
+        let (cur_ts, shift) = u64::decode_var(&from[offset..]).ok_or(Error::VarIntError)?;
         offset += shift;
 
-        let (cur_val_mask, shift) = u64::decode_var(&from[offset..]).unwrap();
+        let (cur_val_mask, shift) =
+            u64::decode_var(&from[offset..]).ok_or(Error::VarIntError)?;
         offset += shift;
 
         last_ts += cur_ts;
@@ -123,7 +125,7 @@ impl Compression {
         }
     }
 
-    pub fn write<W: Write>(&self, block: &[&Entry], to: &mut W) -> io::Result<()> {
+    pub fn write<W: Write>(&self, block: &[&Entry], to: &mut W) -> Result<(), Error> {
         match self {
             Compression::None => write_raw(block, to),
             Compression::Deflate => write_deflate(block, to),
@@ -131,7 +133,7 @@ impl Compression {
         }
     }
 
-    pub fn read(&self, from: &[u8], size: usize) -> io::Result<Vec<Entry>> {
+    pub fn read(&self, from: &[u8], size: usize) -> Result<Vec<Entry>, Error> {
         match self {
             Compression::None => read_raw(&from, size),
             Compression::Deflate => read_deflate(&from, size),
@@ -150,22 +152,32 @@ mod test {
         compression.write(entries, &mut cursor)?;
         cursor.set_position(0);
         assert_eq!(
-            entries.into_iter().cloned().cloned().collect::<Vec<Entry>>(),
+            entries
+                .into_iter()
+                .cloned()
+                .cloned()
+                .collect::<Vec<Entry>>(),
             compression.read(cursor.get_ref(), entries.len())?
         );
         Ok(())
     }
-    
     #[test]
     fn test_delta() {
         check(Compression::Delta, &[&Entry { ts: 1, value: 10.0 }]).unwrap();
-        check(Compression::Delta, &[&Entry { ts: 1, value: 10.0 }, &Entry { ts: 2, value: 20.0 }]).unwrap();
+        check(
+            Compression::Delta,
+            &[&Entry { ts: 1, value: 10.0 }, &Entry { ts: 2, value: 20.0 }],
+        )
+        .unwrap();
         check(
             Compression::Delta,
             &[
                 &Entry { ts: 1, value: 10.0 },
                 &Entry { ts: 2, value: 20.0 },
-                &Entry { ts: 10, value: 30.0 },
+                &Entry {
+                    ts: 10,
+                    value: 30.0,
+                },
             ],
         )
         .unwrap();
@@ -173,6 +185,10 @@ mod test {
 
     #[test]
     fn test_deflate() {
-        check(Compression::Deflate, &[&Entry { ts: 1, value: 10.0 }, &Entry { ts: 2, value: 20.0 }]).unwrap();
+        check(
+            Compression::Deflate,
+            &[&Entry { ts: 1, value: 10.0 }, &Entry { ts: 2, value: 20.0 }],
+        )
+        .unwrap();
     }
 }

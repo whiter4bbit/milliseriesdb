@@ -1,7 +1,9 @@
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::{self, SeekFrom};
+use std::io::SeekFrom;
 use std::time::SystemTime;
+
+use super::error::Error;
 
 const INDEX_ENTRY_LENGTH: u64 = 16u64;
 
@@ -11,7 +13,7 @@ pub struct IndexWriter {
 }
 
 impl IndexWriter {
-    pub fn open(file: File, offset: u64) -> io::Result<IndexWriter> {
+    pub fn open(file: File, offset: u64) -> Result<IndexWriter, Error> {
         let mut writer = IndexWriter {
             offset,
             file,
@@ -19,14 +21,15 @@ impl IndexWriter {
         writer.file.seek(SeekFrom::Start(offset))?;
         Ok(writer)
     }
-    pub fn append(&mut self, ts: u64, offset: u64) -> io::Result<u64> {
+    pub fn append(&mut self, ts: u64, offset: u64) -> Result<u64, Error> {
         self.file.write_all(&ts.to_be_bytes())?;
         self.file.write_all(&offset.to_be_bytes())?;
         self.offset += INDEX_ENTRY_LENGTH;
         Ok(self.offset)
     }
-    pub fn sync(&mut self) -> io::Result<()> {
-        self.file.sync_data()
+    pub fn sync(&mut self) -> Result<(), Error> {
+        self.file.sync_data()?;
+        Ok(())
     }
 }
 
@@ -37,7 +40,7 @@ pub struct IndexReader {
 }
 
 impl IndexReader {
-    pub fn create(file: File, offset: u64) -> io::Result<IndexReader> {
+    pub fn create(file: File, offset: u64) -> Result<IndexReader, Error> {
         Ok(IndexReader {
             file,
             entries: offset / INDEX_ENTRY_LENGTH,
@@ -45,7 +48,7 @@ impl IndexReader {
         })
     }
 
-    fn read_higher_ts(&mut self, entry_index: u64) -> io::Result<u64> {
+    fn read_higher_ts(&mut self, entry_index: u64) -> Result<u64, Error> {
         self.file
             .seek(SeekFrom::Start(entry_index * INDEX_ENTRY_LENGTH))?;
         self.file.read_exact(&mut self.buf)?;
@@ -53,7 +56,7 @@ impl IndexReader {
         Ok(u64::from_be_bytes(self.buf))
     }
 
-    fn read_offset(&mut self, entry_index: u64) -> io::Result<Option<u64>> {
+    fn read_offset(&mut self, entry_index: u64) -> Result<Option<u64>, Error> {
         if entry_index >= self.entries {
             return Ok(None);
         }
@@ -66,7 +69,7 @@ impl IndexReader {
         Ok(Some(u64::from_be_bytes(self.buf)))
     }
 
-    pub fn ceiling_offset(&mut self, target_ts: u64) -> io::Result<Option<u64>> {
+    pub fn ceiling_offset(&mut self, target_ts: u64) -> Result<Option<u64>, Error> {
         let start_ts = SystemTime::now();
         let mut scanned = 0usize;
 

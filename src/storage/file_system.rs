@@ -1,7 +1,7 @@
 use std::fs::{self, File, OpenOptions};
-use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use super::error::Error;
 
 pub enum FileKind {
     #[allow(dead_code)]
@@ -31,25 +31,20 @@ impl SeriesDir {
             FileKind::Log(s) => format!("series.log.{}", s),
         })
     }
-    pub fn open(&self, kind: FileKind, mode: OpenMode) -> io::Result<File> {
+    pub fn open(&self, kind: FileKind, mode: OpenMode) -> Result<File, Error> {
         let path = self.file_path(kind);
         let mut options = OpenOptions::new();
         let options = match mode {
             OpenMode::Read => options.read(true),
             OpenMode::Write => options.read(true).write(true).create(true),
         };
-        options.open(&path).map_err(|err| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Can not open file: {:?}: {:?}", &path, err),
-            )
-        })
+        Ok(options.open(&path)?)
     }
     fn parse_log_filename(&self, s: &str) -> Option<u64> {
         s.strip_prefix("series.log.")
             .and_then(|suffix| suffix.parse::<u64>().ok())
     }
-    pub fn read_log_sequences(&self) -> io::Result<Vec<u64>> {
+    pub fn read_log_sequences(&self) -> Result<Vec<u64>, Error> {
         let mut sequences = fs::read_dir(&self.base_path)?
             .filter_map(|entry| entry.ok())
             .filter_map(|entry| entry.file_name().into_string().ok())
@@ -59,8 +54,8 @@ impl SeriesDir {
         sequences.reverse();
         Ok(sequences)
     }
-    pub fn remove_log(&self, seq: u64) -> io::Result<()> {
-        fs::remove_file(self.file_path(FileKind::Log(seq)))
+    pub fn remove_log(&self, seq: u64) -> Result<(), Error> {
+        Ok(fs::remove_file(self.file_path(FileKind::Log(seq)))?)
     }
 }
 
@@ -69,21 +64,21 @@ pub struct FileSystem {
 }
 
 impl FileSystem {
-    pub fn series<S: AsRef<str>>(&self, name: S) -> io::Result<Arc<SeriesDir>> {
+    pub fn series<S: AsRef<str>>(&self, name: S) -> Result<Arc<SeriesDir>, Error> {
         let base_path = self.base_path.join("series").join(name.as_ref());
         fs::create_dir_all(&base_path)?;
 
         Ok(Arc::new(SeriesDir { base_path }))
     }
 
-    pub fn rename_series<S: AsRef<str>>(&self, src: S, dst: S) -> io::Result<()> {
+    pub fn rename_series<S: AsRef<str>>(&self, src: S, dst: S) -> Result<(), Error> {
         let src_path = self.base_path.join("series").join(src.as_ref());
         let dst_path = self.base_path.join("series").join(dst.as_ref());
 
-        fs::rename(src_path, dst_path)
+        Ok(fs::rename(src_path, dst_path)?)
     }
 
-    pub fn get_series(&self) -> io::Result<Vec<String>> {
+    pub fn get_series(&self) -> Result<Vec<String>,  Error> {
         let mut series = Vec::new();
         for entry in fs::read_dir(self.base_path.join("series"))? {
             let series_path = entry?.path().clone();
@@ -101,7 +96,7 @@ impl FileSystem {
     }
 }
 
-pub fn open<P: AsRef<Path>>(base_path: P) -> io::Result<FileSystem> {
+pub fn open<P: AsRef<Path>>(base_path: P) -> Result<FileSystem, Error> {
     fs::create_dir_all(base_path.as_ref().join("series"))?;
     Ok(FileSystem {
         base_path: base_path.as_ref().to_owned(),
