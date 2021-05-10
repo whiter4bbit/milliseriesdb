@@ -78,7 +78,7 @@ impl SeriesTable {
         let entry = TableEntry::open_or_create(&self.fs, dst.as_ref(), self.sync_mode)?;
         entries.insert(dst.as_ref().to_owned(), Arc::new(entry));
 
-        Ok(false)
+        Ok(true)
     }
 }
 

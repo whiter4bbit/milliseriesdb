@@ -8,9 +8,8 @@ use milliseriesdb::storage::{Compression, Entry, SeriesReader, SeriesTable, Seri
 use serde_derive::{Deserialize, Serialize};
 use std::convert::{Infallible, TryFrom};
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::Arc;
-use std::{io, time};
+use std::io;
 use warp::{http::Response, http::StatusCode, Filter};
 
 mod restapi {
@@ -52,21 +51,21 @@ mod restapi {
     }
 
     pub async fn create(
-        id: String,
+        name: String,
         series_table: Arc<SeriesTable>,
     ) -> Result<impl warp::Reply, Infallible> {
-        Ok(match series_table.create(id) {
+        Ok(match series_table.create(name) {
             Ok(()) => StatusCode::CREATED,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         })
     }
 
     pub async fn append(
-        id: String,
+        name: String,
         entries: JsonEntries,
         series_table: Arc<SeriesTable>,
     ) -> Result<impl warp::Reply, Infallible> {
-        Ok(match series_table.writer(id) {
+        Ok(match series_table.writer(name) {
             Some(writer) => {
                 let result = writer.append_async(entries.entries, Compression::Delta);
                 match result.await {
@@ -79,11 +78,11 @@ mod restapi {
     }
 
     pub async fn query(
-        id: String,
+        name: String,
         statement_expr: StatementExpr,
         series_table: Arc<SeriesTable>,
     ) -> Result<Box<dyn warp::Reply>, Infallible> {
-        Ok(match series_table.reader(id) {
+        Ok(match series_table.reader(name) {
             Some(reader) => match Statement::try_from(statement_expr) {
                 Ok(statement) => match reader.query(statement).rows_async().await {
                     Ok(rows) => Box::new(warp::reply::json(&JsonRows::from_rows(rows))),
@@ -96,7 +95,7 @@ mod restapi {
     }
 
     async fn export_entries(reader: Arc<SeriesReader>, sender: &mut Sender) -> io::Result<()> {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<Entry>>(10);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<Entry>>(1);
 
         tokio::task::spawn_blocking(move || {
             let iter = &mut reader.iterator(0)?;
@@ -214,10 +213,17 @@ mod restapi {
             return Ok(StatusCode::INTERNAL_SERVER_ERROR);
         }
 
-        if let Err(err) = series_table.rename(series_name, name) {
-            log::warn!("can not import series: {:?}", err);
-            return Ok(StatusCode::INTERNAL_SERVER_ERROR);
-        }
+        match series_table.rename(&series_name, &name) {
+            Ok(false) => {
+                log::warn!("can not restore series '{}' -> '{}', conflict", &series_name, &name);
+                return Ok(StatusCode::CONFLICT);
+            },
+            Err(err) => {
+                log::warn!("can not restore series '{}' -> '{}': {:?}", &series_name, &name, err);
+                return Ok(StatusCode::INTERNAL_SERVER_ERROR);
+            },
+            _ => (),
+        };
 
         Ok(StatusCode::OK)
     }
