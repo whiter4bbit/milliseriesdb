@@ -4,7 +4,7 @@ use futures::{Stream, StreamExt};
 use hyper::body::{Body, Bytes, Sender};
 use milliseriesdb::csv;
 use milliseriesdb::query::{Aggregation, QueryBuilder, Row, Statement, StatementExpr};
-use milliseriesdb::storage::{Compression, Entry, SeriesReader, SeriesTable, SeriesWriterGuard};
+use milliseriesdb::storage::{error::Error, Compression, Entry, SeriesReader, SeriesTable, SeriesWriterGuard};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::{Infallible, TryFrom};
 use std::net::SocketAddr;
@@ -101,7 +101,7 @@ mod restapi {
             let iter = &mut reader.iterator(0)?;
 
             loop {
-                let buf = iter.take(1024).collect::<io::Result<Vec<Entry>>>()?;
+                let buf = iter.take(1024).collect::<Result<Vec<Entry>, Error>>()?;
 
                 if buf.is_empty() {
                     break;

@@ -1,7 +1,5 @@
 use std::collections::VecDeque;
-use std::io;
 use std::sync::{Arc, Mutex};
-
 use super::data::{DataReader, DataWriter};
 use super::entry::Entry;
 use super::file_system::{FileKind, OpenMode, SeriesDir};
@@ -9,6 +7,7 @@ use super::index::{IndexReader, IndexWriter};
 use super::log::{LogEntry, LogReader, LogWriter};
 use super::utils::IntoEntriesIterator;
 use super::Compression;
+use super::error::Error;
 
 #[derive(Copy, Clone)]
 pub enum SyncMode {
@@ -31,7 +30,7 @@ pub struct SeriesWriter {
 
 impl SeriesWriter {
     #[allow(dead_code)]
-    pub fn create(dir: Arc<SeriesDir>, sync_mode: SyncMode) -> io::Result<SeriesWriter> {
+    pub fn create(dir: Arc<SeriesDir>, sync_mode: SyncMode) -> Result<SeriesWriter, Error> {
         let log_reader = LogReader::create(dir.clone());
 
         let last_entry = log_reader.get_last_entry_or_default()?;
@@ -55,7 +54,7 @@ impl SeriesWriter {
             writes: 0,
         })
     }
-    fn fsync(&mut self) -> io::Result<()> {
+    fn fsync(&mut self) -> Result<(), Error> {
         self.writes += 1;
         let should_sync = match self.sync_mode {
             SyncMode::Paranoid => true,
@@ -71,7 +70,7 @@ impl SeriesWriter {
     }
 
     #[allow(dead_code)]
-    pub fn append<'a, I>(&mut self, batch: I, compression: Compression) -> io::Result<()>
+    pub fn append<'a, I>(&mut self, batch: I, compression: Compression) -> Result<(), Error>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
@@ -100,7 +99,8 @@ impl SeriesWriter {
         self.log_writer.append(&last_log_entry)?;
         self.last_log_entry = last_log_entry;
 
-        self.fsync()
+        self.fsync()?;
+        Ok(())
     }
 }
 
@@ -111,7 +111,7 @@ pub struct SeriesReader {
 
 impl SeriesReader {
     #[allow(dead_code)]
-    pub fn create(dir: Arc<SeriesDir>) -> io::Result<SeriesReader> {
+    pub fn create(dir: Arc<SeriesDir>) -> Result<SeriesReader, Error> {
         Ok(SeriesReader {
             dir: dir.clone(),
             log_reader: LogReader::create(dir),
@@ -119,7 +119,7 @@ impl SeriesReader {
     }
 
     #[allow(dead_code)]
-    pub fn iterator(&self, from_ts: u64) -> io::Result<SeriesIterator> {
+    pub fn iterator(&self, from_ts: u64) -> Result<SeriesIterator, Error> {
         let last_log_entry = self.log_reader.get_last_entry_or_default()?;
 
         let mut index_reader = IndexReader::create(
@@ -154,7 +154,7 @@ pub struct SeriesIterator {
 }
 
 impl SeriesIterator {
-    fn fetch_block(&mut self) -> io::Result<()> {
+    fn fetch_block(&mut self) -> Result<(), Error> {
         if self.offset < self.size {
             let (entries, offset) = self.data_reader.read_block()?;
             self.offset = offset;
@@ -174,7 +174,7 @@ impl SeriesIterator {
 }
 
 impl Iterator for SeriesIterator {
-    type Item = io::Result<Entry>;
+    type Item = Result<Entry, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.buffer.is_empty() {
@@ -196,13 +196,13 @@ pub struct SeriesWriterGuard {
 }
 
 impl SeriesWriterGuard {
-    pub fn create(dir: Arc<SeriesDir>, sync_mode: SyncMode) -> io::Result<SeriesWriterGuard> {
+    pub fn create(dir: Arc<SeriesDir>, sync_mode: SyncMode) -> Result<SeriesWriterGuard, Error> {
         Ok(SeriesWriterGuard {
             writer: Arc::new(Mutex::new(SeriesWriter::create(dir, sync_mode)?)),
         })
     }
 
-    pub fn append<'a, I>(&self, batch: I, compression: Compression) -> io::Result<()>
+    pub fn append<'a, I>(&self, batch: I, compression: Compression) -> Result<(), Error>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
@@ -214,7 +214,7 @@ impl SeriesWriterGuard {
         &self,
         batch: Vec<Entry>,
         compression: Compression,
-    ) -> io::Result<()> {
+    ) -> Result<(), Error> {
         let writer = self.writer.clone();
         tokio::task::spawn_blocking(move || {
             let mut writer = writer.lock().unwrap();
@@ -227,7 +227,7 @@ impl SeriesWriterGuard {
 
 impl IntoEntriesIterator for Arc<SeriesReader> {
     type Iter = SeriesIterator;
-    fn into_iter(&self, from: u64) -> io::Result<Self::Iter> {
+    fn into_iter(&self, from: u64) -> Result<Self::Iter, Error> {
         self.iterator(from)
     }
 }

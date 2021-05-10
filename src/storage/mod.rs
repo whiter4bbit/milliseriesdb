@@ -8,6 +8,7 @@ mod log;
 mod series;
 pub mod series_table;
 mod utils;
+pub mod error;
 
 #[cfg(test)]
 mod test_utils;

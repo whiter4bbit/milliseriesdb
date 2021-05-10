@@ -1,8 +1,9 @@
 use super::file_system::FileSystem;
 use super::{SeriesReader, SeriesWriterGuard, SyncMode};
+use super::error::Error;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::{io, time};
+use std::time;
 
 struct TableEntry {
     writer: Arc<SeriesWriterGuard>,
@@ -14,7 +15,7 @@ impl TableEntry {
         fs: &FileSystem,
         name: S,
         sync_mode: SyncMode,
-    ) -> io::Result<TableEntry> {
+    ) -> Result<TableEntry, Error> {
         Ok(TableEntry {
             writer: Arc::new(SeriesWriterGuard::create(
                 fs.series(name.as_ref())?,
@@ -40,7 +41,7 @@ impl SeriesTable {
         let entries = self.entries.lock().unwrap();
         entries.get(name.as_ref()).map(|entry| entry.writer.clone())
     }
-    pub fn create<S: AsRef<str>>(&self, name: S) -> io::Result<()> {
+    pub fn create<S: AsRef<str>>(&self, name: S) -> Result<(), Error> {
         let mut entries = self.entries.lock().unwrap();
         if entries.contains_key(name.as_ref()) {
             return Ok(());
@@ -51,7 +52,7 @@ impl SeriesTable {
 
         Ok(())
     }
-    pub fn create_temp(&self) -> io::Result<String> {
+    pub fn create_temp(&self) -> Result<String, Error> {
         let name = format!(
             "restore-{}",
             time::SystemTime::now()
@@ -62,7 +63,7 @@ impl SeriesTable {
         self.create(&name)?;
         Ok(name)
     }
-    pub fn rename<S: AsRef<str>>(&self, src: S, dst: S) -> io::Result<bool> {
+    pub fn rename<S: AsRef<str>>(&self, src: S, dst: S) -> Result<bool, Error> {
         let mut entries = self.entries.lock().unwrap();
         
         if !entries.contains_key(src.as_ref()) || entries.contains_key(dst.as_ref()) {
@@ -82,7 +83,7 @@ impl SeriesTable {
     }
 }
 
-pub fn create(fs: FileSystem, sync_mode: SyncMode) -> io::Result<SeriesTable> {
+pub fn create(fs: FileSystem, sync_mode: SyncMode) -> Result<SeriesTable, Error> {
     let mut entries = HashMap::new();
     for name in fs.get_series()? {
         entries.insert(

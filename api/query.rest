@@ -69,7 +69,7 @@ POST http://localhost:8080/series/temp-1000
 
 ####
 
-GET http://localhost:8080/series/temp-100-delta
+GET https://climate-db-1.whiter4bbit.info/series/t
     ?from=2019-08-01
     &group_by=hour
     &aggregators=mean

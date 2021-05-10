@@ -1,5 +1,4 @@
-use crate::storage::Entry;
-use std::io;
+use crate::storage::{error::Error, Entry};
 use strength_reduce::StrengthReducedU64;
 
 pub trait Folder {
@@ -10,7 +9,7 @@ pub trait Folder {
 
 pub struct GroupBy<I, F>
 where
-    I: Iterator<Item = io::Result<Entry>>,
+    I: Iterator<Item = Result<Entry, Error>>,
     F: Folder,
 {
     pub iterator: I,
@@ -22,7 +21,7 @@ where
 
 impl<I, F> GroupBy<I, F>
 where
-    I: Iterator<Item = io::Result<Entry>>,
+    I: Iterator<Item = Result<Entry, Error>>,
     F: Folder,
 {
     fn key(&self, entry: &Entry) -> u64 {
@@ -32,12 +31,12 @@ where
 
 impl<I, F> Iterator for GroupBy<I, F>
 where
-    I: Iterator<Item = io::Result<Entry>>,
+    I: Iterator<Item = Result<Entry, Error>>,
     F: Folder,
 {
-    type Item = io::Result<(u64, F::Result)>;
+    type Item = Result<(u64, F::Result), Error>;
 
-    fn next(&mut self) -> Option<io::Result<(u64, F::Result)>> {
+    fn next(&mut self) -> Option<Result<(u64, F::Result), Error>> {
         let head = self.current.take().map(Ok).or_else(|| self.iterator.next());
 
         if let Some(head) = head {

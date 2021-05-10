@@ -3,12 +3,11 @@ mod statement;
 mod statement_expr;
 mod group_by;
 
-use crate::storage::IntoEntriesIterator;
+use crate::storage::{error::Error, IntoEntriesIterator};
 pub use aggregation::{Aggregation, AggregatorsFolder};
 use serde_derive::{Deserialize, Serialize};
 pub use statement::Statement;
 pub use statement_expr::StatementExpr;
-use std::io;
 use std::time::SystemTime;
 use strength_reduce::StrengthReducedU64;
 use group_by::GroupBy;
@@ -56,7 +55,7 @@ impl<I> Query<I>
 where
     I: IntoEntriesIterator,
 {
-    pub fn rows(self) -> io::Result<Vec<Row>> {
+    pub fn rows(self) -> Result<Vec<Row>, Error> {
         let folder = AggregatorsFolder::new(&self.statement.aggregators);
 
         let group_by = &mut GroupBy {
@@ -72,7 +71,7 @@ where
         let rows = group_by
             .map(|e| e.map(|e| e.into()))
             .take(self.statement.limit)
-            .collect::<io::Result<Vec<Row>>>()?;
+            .collect::<Result<Vec<Row>, Error>>()?;
 
         log::debug!(
             "Scanned {} entries in {}ms",
@@ -88,7 +87,7 @@ impl<I> Query<I>
 where
     I: IntoEntriesIterator + Send + 'static,
 {
-    pub async fn rows_async(self) -> io::Result<Vec<Row>> {
+    pub async fn rows_async(self) -> Result<Vec<Row>, Error> {
         tokio::task::spawn_blocking(move || self.rows())
             .await
             .unwrap()

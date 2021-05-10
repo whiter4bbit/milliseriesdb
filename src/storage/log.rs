@@ -5,6 +5,7 @@ use std::io::prelude::*;
 use std::io::{self, BufReader};
 use std::sync::Arc;
 
+use super::error::Error;
 use super::file_system::{FileKind, OpenMode, SeriesDir};
 use super::io_utils::{ReadBytes, WriteBytes};
 
@@ -35,7 +36,7 @@ impl LogEntry {
 
         checksum
     }
-    fn read_entry<R: Read>(read: &mut R) -> io::Result<LogEntry> {
+    fn read_entry<R: Read>(read: &mut R) -> Result<LogEntry, Error> {
         let entry = LogEntry {
             data_offset: read.read_u64()?,
             index_offset: read.read_u64()?,
@@ -45,12 +46,12 @@ impl LogEntry {
         let checksum = read.read_u32()?;
 
         if checksum != entry.checksum() {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "crc32 mismatch"));
+            return Err(Error::Crc32Mismatch);
         }
 
         Ok(entry)
     }
-    fn write_entry<W: Write>(&self, write: &mut W) -> io::Result<()> {
+    fn write_entry<W: Write>(&self, write: &mut W) -> Result<(), Error> {
         write.write_u64(&self.data_offset)?;
         write.write_u64(&self.index_offset)?;
         write.write_u64(&self.highest_ts)?;
@@ -68,23 +69,24 @@ impl LogReader {
         LogReader { dir }
     }
 
-    fn read_last_entry(&self, seq: u64) -> io::Result<Option<LogEntry>> {
+    fn read_last_entry(&self, seq: u64) -> Result<Option<LogEntry>, Error> {
         let mut file = BufReader::new(self.dir.open(FileKind::Log(seq), OpenMode::Read)?);
         let mut last: Option<LogEntry> = None;
         loop {
             match LogEntry::read_entry(&mut file) {
-                Err(error) => match error.kind() {
+                Err(Error::Io(error)) => match error.kind() {
                     io::ErrorKind::UnexpectedEof => break,
-                    io::ErrorKind::InvalidData => break,
-                    _ => return Err(error),
+                    _ => return Err(Error::Io(error)),
                 },
+                Err(Error::Crc32Mismatch) => break,
+                Err(error) => return Err(error),
                 Ok(entry) => last = Some(entry),
             }
         }
         Ok(last)
     }
 
-    pub fn get_last_entry_or_default(&self) -> io::Result<LogEntry> {
+    pub fn get_last_entry_or_default(&self) -> Result<LogEntry, Error> {
         for seq in self.dir.read_log_sequences()? {
             if let Some(entry) = self.read_last_entry(seq)? {
                 return Ok(entry);
@@ -104,15 +106,9 @@ pub struct LogWriter {
 }
 
 impl LogWriter {
-    pub fn create(dir: Arc<SeriesDir>, max_size: u64) -> io::Result<LogWriter> {
+    pub fn create(dir: Arc<SeriesDir>, max_size: u64) -> Result<LogWriter, Error> {
         if max_size < LOG_ENTRY_SIZE {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "max_size should be at least {} ({})",
-                    LOG_ENTRY_SIZE, max_size
-                ),
-            ));
+            return Err(Error::ArgTooSmall);
         }
 
         let mut sequences: VecDeque<u64> = dir.read_log_sequences()?.into_iter().collect();
@@ -137,7 +133,7 @@ impl LogWriter {
 
         Ok(writer)
     }
-    fn cleanup(&mut self) -> io::Result<()> {
+    fn cleanup(&mut self) -> Result<(), Error> {
         while self.sequences.len() > 2 {
             if let Some(s) = self.sequences.pop_back() {
                 self.dir.remove_log(s)?;
@@ -145,7 +141,7 @@ impl LogWriter {
         }
         Ok(())
     }
-    fn rotate_if_needed(&mut self) -> io::Result<()> {
+    fn rotate_if_needed(&mut self) -> Result<(), Error> {
         if self.current_size + LOG_ENTRY_SIZE < self.max_size {
             return Ok(());
         }
@@ -166,7 +162,7 @@ impl LogWriter {
 
         self.cleanup()
     }
-    pub fn append(&mut self, entry: &LogEntry) -> io::Result<()> {
+    pub fn append(&mut self, entry: &LogEntry) -> Result<(), Error> {
         self.rotate_if_needed()?;
 
         entry.write_entry(&mut self.file)?;
@@ -174,8 +170,9 @@ impl LogWriter {
         self.current_size += LOG_ENTRY_SIZE;
         Ok(())
     }
-    pub fn sync(&mut self) -> io::Result<()> {
-        self.file.sync_data()
+    pub fn sync(&mut self) -> Result<(), Error> {
+        self.file.sync_data()?;
+        Ok(())
     }
 }
 
@@ -208,10 +205,7 @@ mod test {
         assert_eq!(
             true,
             match LogEntry::read_entry(&mut cursor) {
-                Err(error) => match error.kind() {
-                    io::ErrorKind::InvalidData => true,
-                    _ => false,
-                },
+                Err(Error::Crc32Mismatch) => true,
                 _ => false,
             }
         );
@@ -224,10 +218,7 @@ mod test {
         assert_eq!(
             true,
             match LogEntry::read_entry(&mut cursor) {
-                Err(error) => match error.kind() {
-                    io::ErrorKind::InvalidData => true,
-                    _ => false,
-                },
+                Err(Error::Crc32Mismatch) => true,
                 _ => false,
             }
         );
