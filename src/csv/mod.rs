@@ -14,15 +14,21 @@ pub fn read_csv_line(line: &str) -> Option<Entry> {
     }
 }
 
+pub fn to_csv(entries: &[Entry]) -> String {
+    entries
+        .iter()
+        .map(|entry| format!("{}; {:.2}\n", entry.ts, entry.value))
+        .collect::<Vec<String>>()
+        .join("")
+}
+
 pub struct ChunkedReader {
     buf: Vec<u8>,
 }
 
 impl ChunkedReader {
     pub fn new() -> ChunkedReader {
-        ChunkedReader {
-            buf: Vec::new(),
-        }
+        ChunkedReader { buf: Vec::new() }
     }
 
     pub fn read<B: Buf>(&mut self, chunk: B) -> Chunk<B> {

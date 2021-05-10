@@ -3,6 +3,7 @@ use milliseriesdb::query::StatementExpr;
 use milliseriesdb::storage::{file_system, series_table, Compression, SyncMode};
 use std::sync::Arc;
 
+mod restapi;
 mod append;
 mod export;
 mod query;
