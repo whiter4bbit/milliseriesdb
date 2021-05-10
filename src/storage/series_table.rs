@@ -1,12 +1,12 @@
 use super::file_system::FileSystem;
-use super::{SeriesReader, SeriesWriterGuard, SyncMode};
+use super::{SeriesReader, SeriesWriter, SyncMode};
 use super::error::Error;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time;
 
 struct TableEntry {
-    writer: Arc<SeriesWriterGuard>,
+    writer: Arc<SeriesWriter>,
     reader: Arc<SeriesReader>,
 }
 
@@ -17,7 +17,7 @@ impl TableEntry {
         sync_mode: SyncMode,
     ) -> Result<TableEntry, Error> {
         Ok(TableEntry {
-            writer: Arc::new(SeriesWriterGuard::create_opt(
+            writer: Arc::new(SeriesWriter::create_opt(
                 fs.series(name.as_ref())?,
                 sync_mode,
             )?),
@@ -37,7 +37,7 @@ impl SeriesTable {
         let entries = self.entries.lock().unwrap();
         entries.get(name.as_ref()).map(|entry| entry.reader.clone())
     }
-    pub fn writer<S: AsRef<str>>(&self, name: S) -> Option<Arc<SeriesWriterGuard>> {
+    pub fn writer<S: AsRef<str>>(&self, name: S) -> Option<Arc<SeriesWriter>> {
         let entries = self.entries.lock().unwrap();
         entries.get(name.as_ref()).map(|entry| entry.writer.clone())
     }

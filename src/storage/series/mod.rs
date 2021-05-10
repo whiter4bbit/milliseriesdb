@@ -2,7 +2,7 @@ mod series_reader;
 mod series_writer;
 
 pub use series_reader::{SeriesIterator, SeriesReader};
-pub use series_writer::{SeriesWriter, SeriesWriterGuard, SyncMode};
+pub use series_writer::{SeriesWriter, SyncMode};
 
 #[cfg(test)]
 mod test {
@@ -36,7 +36,7 @@ mod test {
             entry(140, 1140.0),
         ];
         {
-            let mut writer = SeriesWriter::create(series_dir.clone())?;
+            let writer = SeriesWriter::create(series_dir.clone())?;
             writer.append(&entries[0..5])?;
             writer.append(&entries[5..8])?;
             writer.append(&entries[8..11])?;
@@ -59,7 +59,7 @@ mod test {
         );
 
         {
-            let mut writer = SeriesWriter::create(series_dir)?;
+            let writer = SeriesWriter::create(series_dir)?;
             writer.append(&entries[11..13])?;
         }
 

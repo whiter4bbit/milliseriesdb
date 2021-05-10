@@ -4,7 +4,7 @@ use futures::{Stream, StreamExt};
 use hyper::body::{Body, Bytes, Sender};
 use milliseriesdb::csv;
 use milliseriesdb::query::{Aggregation, QueryBuilder, Row, Statement, StatementExpr};
-use milliseriesdb::storage::{error::Error, Entry, SeriesReader, SeriesTable, SeriesWriterGuard};
+use milliseriesdb::storage::{error::Error, Entry, SeriesReader, SeriesTable, SeriesWriter};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::{Infallible, TryFrom};
 use std::io;
@@ -160,7 +160,7 @@ mod restapi {
             })
     }
 
-    async fn import_entries<S, B>(body: S, writer: Arc<SeriesWriterGuard>) -> io::Result<()>
+    async fn import_entries<S, B>(body: S, writer: Arc<SeriesWriter>) -> io::Result<()>
     where
         S: Stream<Item = Result<B, warp::Error>> + Send + 'static + Unpin,
         B: Buf + Send,

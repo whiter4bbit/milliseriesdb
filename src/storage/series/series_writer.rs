@@ -17,7 +17,7 @@ pub enum SyncMode {
     Every(u16),
 }
 
-pub struct SeriesWriter {
+struct SeriesWriterInterior {
     data_writer: DataWriter,
     index_writer: IndexWriter,
     log_writer: LogWriter,
@@ -26,12 +26,12 @@ pub struct SeriesWriter {
     writes: u64,
 }
 
-impl SeriesWriter {
-    pub fn create(dir: Arc<SeriesDir>) -> Result<SeriesWriter, Error> {
-        SeriesWriter::create_opt(dir, SyncMode::Paranoid)
+impl SeriesWriterInterior {
+    fn create(dir: Arc<SeriesDir>) -> Result<SeriesWriterInterior, Error> {
+        SeriesWriterInterior::create_opt(dir, SyncMode::Paranoid)
     }
     #[allow(dead_code)]
-    pub fn create_opt(dir: Arc<SeriesDir>, sync_mode: SyncMode) -> Result<SeriesWriter, Error> {
+    fn create_opt(dir: Arc<SeriesDir>, sync_mode: SyncMode) -> Result<SeriesWriterInterior, Error> {
         let log_reader = LogReader::create(dir.clone());
 
         let last_entry = log_reader.get_last_entry_or_default()?;
@@ -40,7 +40,7 @@ impl SeriesWriter {
         log_writer.append(&last_entry)?;
         log_writer.sync()?;
 
-        Ok(SeriesWriter {
+        Ok(SeriesWriterInterior {
             data_writer: DataWriter::create(
                 dir.open(FileKind::Data, OpenMode::Write)?,
                 last_entry.data_offset,
@@ -70,7 +70,7 @@ impl SeriesWriter {
         Ok(())
     }
 
-    pub fn append<'a, I>(&mut self, batch: I) -> Result<(), Error>
+    fn append<'a, I>(&mut self, batch: I) -> Result<(), Error>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
@@ -78,7 +78,7 @@ impl SeriesWriter {
     }
 
     #[allow(dead_code)]
-    pub fn append_opt<'a, I>(&mut self, batch: I, compression: Compression) -> Result<(), Error>
+    fn append_opt<'a, I>(&mut self, batch: I, compression: Compression) -> Result<(), Error>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
@@ -113,23 +113,23 @@ impl SeriesWriter {
 }
 
 #[derive(Clone)]
-pub struct SeriesWriterGuard {
-    writer: Arc<Mutex<SeriesWriter>>,
+pub struct SeriesWriter {
+    writer: Arc<Mutex<SeriesWriterInterior>>,
 }
 
-impl SeriesWriterGuard {
-    pub fn create(dir: Arc<SeriesDir>) -> Result<SeriesWriterGuard, Error> {
-        Ok(SeriesWriterGuard {
-            writer: Arc::new(Mutex::new(SeriesWriter::create(dir)?)),
+impl SeriesWriter {
+    pub fn create(dir: Arc<SeriesDir>) -> Result<SeriesWriter, Error> {
+        Ok(SeriesWriter {
+            writer: Arc::new(Mutex::new(SeriesWriterInterior::create(dir)?)),
         })
     }
 
     pub fn create_opt(
         dir: Arc<SeriesDir>,
         sync_mode: SyncMode,
-    ) -> Result<SeriesWriterGuard, Error> {
-        Ok(SeriesWriterGuard {
-            writer: Arc::new(Mutex::new(SeriesWriter::create_opt(dir, sync_mode)?)),
+    ) -> Result<SeriesWriter, Error> {
+        Ok(SeriesWriter {
+            writer: Arc::new(Mutex::new(SeriesWriterInterior::create_opt(dir, sync_mode)?)),
         })
     }
 
