@@ -102,7 +102,7 @@ mod test {
 
     #[test]
     fn test_ceiling() -> Result<(), Error> {
-        let fs = &file_system::open_temp()?.fs;
+        let fs = &file_system::open_temp()?;
         let series_dir = fs.series("series1")?;
 
         let offset = {

@@ -193,7 +193,7 @@ mod test {
 
     #[test]
     fn test_read_write() -> Result<(), Error>{
-        let fs = &file_system::open_temp()?.fs;
+        let fs = &file_system::open_temp()?;
         let series_dir = fs.series("series1")?;
 
         let entries = vec![

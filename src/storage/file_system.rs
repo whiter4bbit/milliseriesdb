@@ -107,6 +107,9 @@ pub fn open<P: AsRef<Path>>(base_path: P) -> Result<FileSystem, Error> {
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
+use std::ops::Deref;
+
+#[cfg(test)]
 pub struct TempFS {
     pub fs: FileSystem,
     path: PathBuf,
@@ -116,6 +119,14 @@ pub struct TempFS {
 impl Drop for TempFS {
     fn drop(&mut self) {
         fs::remove_dir_all(&self.path).unwrap();
+    }
+}
+
+#[cfg(test)]
+impl Deref for TempFS {
+    type Target = FileSystem;
+    fn deref(&self) -> &Self::Target {
+        &self.fs
     }
 }
 

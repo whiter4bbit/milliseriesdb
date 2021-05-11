@@ -17,7 +17,7 @@ mod test {
 
     #[test]
     fn test_series_read_write() -> Result<(), Error> {
-        let file_system = &file_system::open_temp()?.fs;
+        let file_system = &file_system::open_temp()?;
         let series_dir = file_system.series("series1")?;
 
         let entries = [
