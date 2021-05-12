@@ -3,7 +3,7 @@ use serde_derive::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 #[derive(Deserialize, Serialize)]
 pub struct Entry {
-    pub ts: u64,
+    pub ts: i64,
     pub value: f64,
 }
 

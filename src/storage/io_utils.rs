@@ -5,7 +5,15 @@ pub trait WriteBytes: Write {
         self.write_all(&v.to_be_bytes())?;
         Ok(())
     }
+    fn write_u16(&mut self, v: &u16) -> io::Result<()> {
+        self.write_all(&v.to_be_bytes())?;
+        Ok(())
+    }
     fn write_u32(&mut self, v: &u32) -> io::Result<()> {
+        self.write_all(&v.to_be_bytes())?;
+        Ok(())
+    }
+    fn write_i64(&mut self, v: &i64) -> io::Result<()> {
         self.write_all(&v.to_be_bytes())?;
         Ok(())
     }
@@ -26,6 +34,11 @@ pub trait ReadBytes: Read {
         let mut buf = [0u8; 1];
         self.read_exact(&mut buf)?;
         Ok(buf[0])
+    }
+    fn read_i64(&mut self) -> io::Result<i64> {
+        let mut buf = [0u8; 8];
+        self.read_exact(&mut buf)?;
+        Ok(i64::from_be_bytes(buf))
     }
     fn read_u64(&mut self) -> io::Result<u64> {
         let mut buf = [0u8; 8];

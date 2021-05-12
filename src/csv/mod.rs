@@ -6,7 +6,7 @@ pub fn read_csv_line(line: &str) -> Option<Entry> {
 
     match (split.next(), split.next()) {
         (Some(ts), Some(value)) => {
-            let ts = ts.trim().parse::<u64>().ok()?;
+            let ts = ts.trim().parse::<i64>().ok()?;
             let value = value.trim().parse::<f64>().ok()?;
             Some(Entry { ts, value })
         }
@@ -35,7 +35,7 @@ impl ChunkedReader {
 
 pub struct Chunk<'a, B: Buf> {
     chunk: B,
-    buf: &'a mut Vec<u8>,
+    buf: &'a mut Vec<u8>
 }
 
 impl<'a, B> Iterator for Chunk<'a, B>

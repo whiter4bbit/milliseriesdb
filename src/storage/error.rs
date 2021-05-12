@@ -8,6 +8,8 @@ pub enum Error {
     Slice(array::TryFromSliceError),
     VarIntError,
     ArgTooSmall,
+    TooManyEntries,
+    DataFileTooBig,
 }
 
 impl From<io::Error> for Error {

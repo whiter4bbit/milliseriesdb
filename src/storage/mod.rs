@@ -11,5 +11,5 @@ pub mod error;
 
 pub use compression::Compression;
 pub use entry::Entry;
-pub use series::{SeriesReader, SeriesIterator, SeriesWriter, SyncMode};
+pub use series::{SeriesReader, SeriesIterator, SeriesWriter};
 pub use series_table::SeriesTable;

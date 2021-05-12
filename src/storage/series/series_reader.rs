@@ -22,7 +22,7 @@ impl SeriesReader {
     }
 
     #[allow(dead_code)]
-    pub fn iterator(&self, from_ts: u64) -> Result<SeriesIterator, Error> {
+    pub fn iterator(&self, from_ts: i64) -> Result<SeriesIterator, Error> {
         let last_log_entry = self.log_reader.get_last_entry_or_default()?;
 
         let mut index_reader = IndexReader::create(
@@ -52,7 +52,7 @@ pub struct SeriesIterator {
     data_reader: DataReader,
     offset: u64,
     size: u64,
-    from_ts: u64,
+    from_ts: i64,
     buffer: VecDeque<Entry>,
 }
 

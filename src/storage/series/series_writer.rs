@@ -1,4 +1,4 @@
-use super::super::data::DataWriter;
+use super::super::data::{self, DataWriter};
 use super::super::entry::Entry;
 use super::super::error::Error;
 use super::super::file_system::{FileKind, OpenMode, SeriesDir};
@@ -7,32 +7,21 @@ use super::super::log::{LogEntry, LogReader, LogWriter};
 use super::super::Compression;
 use std::sync::{Arc, Mutex};
 
-#[derive(Copy, Clone)]
-pub enum SyncMode {
-    Paranoid,
-    Never,
-    Every(u16),
-}
-
 struct SeriesWriterInterior {
     data_writer: DataWriter,
     index_writer: IndexWriter,
     log_writer: LogWriter,
-    sync_mode: SyncMode,
-    writes: u64,
-    max_entries_per_block: u32,
     data_offset: u64,
-    highest_ts: u64,
+    highest_ts: i64,
 }
 
 impl SeriesWriterInterior {
     fn create(dir: Arc<SeriesDir>) -> Result<SeriesWriterInterior, Error> {
-        SeriesWriterInterior::create_opt(dir, SyncMode::Paranoid, 128, 1024 * 1024)
+        SeriesWriterInterior::create_opt(dir, 1024 * 1024)
     }
+
     fn create_opt(
         dir: Arc<SeriesDir>,
-        sync_mode: SyncMode,
-        max_entries_per_block: u32,
         max_log_segment_size: u32,
     ) -> Result<SeriesWriterInterior, Error> {
         let log_reader = LogReader::create(dir.clone());
@@ -52,36 +41,17 @@ impl SeriesWriterInterior {
                 last_entry.index_offset,
             )?,
             log_writer,
-            sync_mode,
-            writes: 0,
-            max_entries_per_block: max_entries_per_block,
             data_offset: last_entry.data_offset,
             highest_ts: last_entry.highest_ts,
         })
     }
+
     fn fsync(&mut self) -> Result<(), Error> {
-        self.writes += 1;
-
-        let should_sync = match self.sync_mode {
-            SyncMode::Paranoid => true,
-            SyncMode::Every(p) if p > 0 && self.writes % p as u64 == 0 => true,
-            _ => false,
-        };
-
-        if should_sync {
-            self.data_writer.sync()?;
-            self.index_writer.sync()?;
-            self.log_writer.sync()?;
-        }
+        self.data_writer.sync()?;
+        self.index_writer.sync()?;
+        self.log_writer.sync()?;
 
         Ok(())
-    }
-
-    fn append<'a, I>(&mut self, batch: I) -> Result<(), Error>
-    where
-        I: IntoIterator<Item = &'a Entry> + 'a,
-    {
-        self.append_opt(batch, Compression::Delta)
     }
 
     fn process_entries<'a, I>(&mut self, entries: I) -> Vec<&'a Entry>
@@ -96,8 +66,11 @@ impl SeriesWriterInterior {
         entries
     }
 
-    fn append_block<'a>(&mut self, block: Vec<&'a Entry>, compression: Compression) -> Result<(), Error>
-    {
+    fn append_block<'a>(
+        &mut self,
+        block: Vec<&'a Entry>,
+        compression: Compression,
+    ) -> Result<(), Error> {
         let highest_ts = match block.last() {
             Some(entry) => entry.ts,
             _ => return Ok(()),
@@ -120,17 +93,23 @@ impl SeriesWriterInterior {
         Ok(())
     }
 
+    fn append<'a, I>(&mut self, batch: I) -> Result<(), Error>
+    where
+        I: IntoIterator<Item = &'a Entry> + 'a,
+    {
+        self.append_opt(batch, Compression::Delta)
+    }
+
     fn append_opt<'a, I>(&mut self, entries: I, compression: Compression) -> Result<(), Error>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
         let iter = &mut self.process_entries(entries).into_iter();
-        
         loop {
-            let block: Vec<&'a Entry> = iter.take(self.max_entries_per_block as usize).collect();
+            let block: Vec<&'a Entry> = iter.take(data::MAX_ENTRIES_PER_BLOCK).collect();
 
             if block.is_empty() {
-                return Ok(())
+                return Ok(());
             }
 
             self.append_block(block, compression.clone())?;
@@ -152,15 +131,11 @@ impl SeriesWriter {
 
     pub fn create_opt(
         dir: Arc<SeriesDir>,
-        sync_mode: SyncMode,
-        max_entries_per_block: u32,
         max_log_segment_size: u32,
     ) -> Result<SeriesWriter, Error> {
         Ok(SeriesWriter {
             writer: Arc::new(Mutex::new(SeriesWriterInterior::create_opt(
                 dir,
-                sync_mode,
-                max_entries_per_block,
                 max_log_segment_size,
             )?)),
         })

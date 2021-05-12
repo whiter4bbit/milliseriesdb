@@ -13,18 +13,18 @@ pub struct StatementExpr {
     pub limit: String,
 }
 
-fn parse_date_time(s: &str, format: &str, s_suffix: &str) -> Result<u64, ()> {
+fn parse_date_time(s: &str, format: &str, s_suffix: &str) -> Result<i64, ()> {
     Utc.datetime_from_str((s.to_owned() + s_suffix).as_ref(), format)
         .map_err(|_| ())
-        .map(|dt| dt.timestamp_millis() as u64)
+        .map(|dt| dt.timestamp_millis())
 }
 
-fn parse_millis(s: &str) -> Result<u64, ()> {
-    s.parse::<u64>().map_err(|_| ())
+fn parse_millis(s: &str) -> Result<i64, ()> {
+    s.parse::<i64>().map_err(|_| ())
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct FromTimestamp(u64);
+struct FromTimestamp(i64);
 
 impl FromStr for FromTimestamp {
     type Err = ();

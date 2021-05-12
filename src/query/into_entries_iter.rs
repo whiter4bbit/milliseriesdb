@@ -3,12 +3,12 @@ use std::sync::Arc;
 
 pub trait IntoEntriesIter {
     type Iter: Iterator<Item = Result<Entry, Error>>;
-    fn into_iter(&self, from: u64) -> Result<Self::Iter, Error>;
+    fn into_iter(&self, from: i64) -> Result<Self::Iter, Error>;
 }
 
 impl IntoEntriesIter for Arc<SeriesReader> {
     type Iter = SeriesIterator;
-    fn into_iter(&self, from: u64) -> Result<Self::Iter, Error> {
+    fn into_iter(&self, from: i64) -> Result<Self::Iter, Error> {
         self.iterator(from)
     }
 }
@@ -32,7 +32,7 @@ impl Iterator for VecIterator {
 #[cfg(test)]
 impl IntoEntriesIter for Vec<Entry> {
     type Iter = VecIterator;
-    fn into_iter(&self, from: u64) -> Result<Self::Iter, Error> {
+    fn into_iter(&self, from: i64) -> Result<Self::Iter, Error> {
         let mut iter = VecIterator {
             deque: VecDeque::new(),
         };

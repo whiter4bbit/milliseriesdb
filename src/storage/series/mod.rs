@@ -2,7 +2,7 @@ mod series_reader;
 mod series_writer;
 
 pub use series_reader::{SeriesIterator, SeriesReader};
-pub use series_writer::{SeriesWriter, SyncMode};
+pub use series_writer::SeriesWriter;
 
 #[cfg(test)]
 mod test {
@@ -11,7 +11,7 @@ mod test {
     use super::super::file_system;
     use super::*;
 
-    fn entry(ts: u64, value: f64) -> Entry {
+    fn entry(ts: i64, value: f64) -> Entry {
         Entry { ts, value }
     }
 

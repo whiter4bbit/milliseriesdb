@@ -24,8 +24,8 @@ where
     I: Iterator<Item = Result<Entry, Error>>,
     F: Folder,
 {
-    fn key(&self, entry: &Entry) -> u64 {
-        entry.ts - (entry.ts % self.granularity)
+    fn key(&self, entry: &Entry) -> i64 {
+        entry.ts - (entry.ts % (self.granularity.get() as i64))
     }
 }
 
@@ -34,9 +34,9 @@ where
     I: Iterator<Item = Result<Entry, Error>>,
     F: Folder,
 {
-    type Item = Result<(u64, F::Result), Error>;
+    type Item = Result<(i64, F::Result), Error>;
 
-    fn next(&mut self) -> Option<Result<(u64, F::Result), Error>> {
+    fn next(&mut self) -> Option<Result<(i64, F::Result), Error>> {
         let head = self.current.take().map(Ok).or_else(|| self.iterator.next());
 
         if let Some(head) = head {

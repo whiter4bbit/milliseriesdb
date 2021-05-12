@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::SeekFrom;
-use std::time::SystemTime;
 
 use super::error::Error;
 
@@ -18,7 +17,7 @@ impl IndexWriter {
         writer.file.seek(SeekFrom::Start(offset))?;
         Ok(writer)
     }
-    pub fn append(&mut self, ts: u64, offset: u64) -> Result<u64, Error> {
+    pub fn append(&mut self, ts: i64, offset: u64) -> Result<u64, Error> {
         self.file.write_all(&ts.to_be_bytes())?;
         self.file.write_all(&offset.to_be_bytes())?;
         self.offset += INDEX_ENTRY_LENGTH;
@@ -45,12 +44,12 @@ impl IndexReader {
         })
     }
 
-    fn read_higher_ts(&mut self, entry_index: u64) -> Result<u64, Error> {
+    fn read_higher_ts(&mut self, entry_index: u64) -> Result<i64, Error> {
         self.file
             .seek(SeekFrom::Start(entry_index * INDEX_ENTRY_LENGTH))?;
         self.file.read_exact(&mut self.buf)?;
 
-        Ok(u64::from_be_bytes(self.buf))
+        Ok(i64::from_be_bytes(self.buf))
     }
 
     fn read_offset(&mut self, entry_index: u64) -> Result<Option<u64>, Error> {
@@ -66,10 +65,7 @@ impl IndexReader {
         Ok(Some(u64::from_be_bytes(self.buf)))
     }
 
-    pub fn ceiling_offset(&mut self, target_ts: u64) -> Result<Option<u64>, Error> {
-        let start_ts = SystemTime::now();
-        let mut scanned = 0usize;
-
+    pub fn ceiling_offset(&mut self, target_ts: i64) -> Result<Option<u64>, Error> {
         let mut lo = 0i128;
         let mut hi = (self.entries as i128 - 1) as i128;
         while lo <= hi {
@@ -80,18 +76,9 @@ impl IndexReader {
             } else {
                 hi = m - 1;
             }
-
-            scanned += 1;
         }
 
-        let result = self.read_offset(lo as u64);
-
-        log::debug!(
-            "Index scanned {} entries took {}us",
-            scanned,
-            start_ts.elapsed().unwrap().as_micros()
-        );
-        result
+        self.read_offset(lo as u64)
     }
 }
 

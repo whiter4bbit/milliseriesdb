@@ -1,6 +1,6 @@
 use super::error::Error;
 use super::file_system::FileSystem;
-use super::{SeriesReader, SeriesWriter, SyncMode};
+use super::{SeriesReader, SeriesWriter};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time;
@@ -13,8 +13,7 @@ struct TableEntry {
 impl TableEntry {
     pub fn open_or_create<S: AsRef<str>>(
         fs: &FileSystem,
-        name: S,
-        sync_mode: SyncMode,
+        name: S
     ) -> Result<TableEntry, Error> {
         Ok(TableEntry {
             writer: Arc::new(SeriesWriter::create(fs.series(name.as_ref())?)?),
@@ -25,7 +24,6 @@ impl TableEntry {
 
 pub struct SeriesTable {
     fs: FileSystem,
-    sync_mode: SyncMode,
     entries: Arc<Mutex<HashMap<String, Arc<TableEntry>>>>,
 }
 
@@ -44,7 +42,7 @@ impl SeriesTable {
             return Ok(());
         }
 
-        let entry = TableEntry::open_or_create(&self.fs, &name, self.sync_mode)?;
+        let entry = TableEntry::open_or_create(&self.fs, &name)?;
         entries.insert(name.as_ref().to_owned(), Arc::new(entry));
 
         Ok(())
@@ -72,25 +70,24 @@ impl SeriesTable {
             entries.remove(src.as_ref());
         }
 
-        let entry = TableEntry::open_or_create(&self.fs, dst.as_ref(), self.sync_mode)?;
+        let entry = TableEntry::open_or_create(&self.fs, dst.as_ref())?;
         entries.insert(dst.as_ref().to_owned(), Arc::new(entry));
 
         Ok(true)
     }
 }
 
-pub fn create(fs: FileSystem, sync_mode: SyncMode) -> Result<SeriesTable, Error> {
+pub fn create(fs: FileSystem) -> Result<SeriesTable, Error> {
     let mut entries = HashMap::new();
     for name in fs.get_series()? {
         entries.insert(
             name.to_owned(),
-            Arc::new(TableEntry::open_or_create(&fs, &name, sync_mode)?),
+            Arc::new(TableEntry::open_or_create(&fs, &name)?),
         );
     }
 
     Ok(SeriesTable {
         fs,
-        sync_mode,
         entries: Arc::new(Mutex::new(entries)),
     })
 }

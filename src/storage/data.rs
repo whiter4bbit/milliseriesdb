@@ -6,13 +6,23 @@ use std::io::{Cursor, SeekFrom};
 
 use super::compression::Compression;
 use super::entry::Entry;
-use super::io_utils::WriteBytes;
 use super::error::Error;
+use super::io_utils::WriteBytes;
 
-const BLOCK_HEADER_SIZE: u64 = 4 + 1 + 4 + 4;
+const BLOCK_HEADER_SIZE: u64 = 2 + 1 + 4 + 4;
+
+#[cfg(not(test))]
+const MAX_DATA_FILE_SIZE: u32 = u32::MAX;
+
+#[cfg(test)]
+const MAX_DATA_FILE_SIZE: u32 = 10 * 1024 * 1024;
+
+const MAX_BLOCK_SIZE: u32 = 2 * 1024 * 1024;
+
+pub const MAX_ENTRIES_PER_BLOCK: usize = u16::MAX as usize;
 
 struct BlockHeader {
-    entries_count: u32,
+    entries_count: u16,
     compression: Compression,
     payload_size: u32,
 }
@@ -30,19 +40,19 @@ impl BlockHeader {
     }
     fn read(bytes: &[u8]) -> Result<BlockHeader, Error> {
         let header = BlockHeader {
-            entries_count: u32::from_be_bytes(bytes[..4].try_into()?),
+            entries_count: u16::from_be_bytes(bytes[..2].try_into()?),
             compression: {
-                let marker = bytes[4];
+                let marker = bytes[2];
 
                 match Compression::from_marker(marker) {
                     Some(compression) => compression,
                     None => return Err(Error::UnknownCompression),
                 }
             },
-            payload_size: u32::from_be_bytes(bytes[5..9].try_into()?),
+            payload_size: u32::from_be_bytes(bytes[3..7].try_into()?),
         };
 
-        let checksum = u32::from_be_bytes(bytes[9..13].try_into()?);
+        let checksum = u32::from_be_bytes(bytes[7..11].try_into()?);
 
         if checksum != header.checksum() {
             return Err(Error::Crc32Mismatch);
@@ -51,7 +61,7 @@ impl BlockHeader {
         Ok(header)
     }
     fn write(&self, file: &mut File) -> Result<(), Error> {
-        file.write_u32(&self.entries_count)?;
+        file.write_u16(&self.entries_count)?;
         file.write_u8(&(self.compression.marker()))?;
         file.write_u32(&self.payload_size)?;
 
@@ -71,7 +81,7 @@ impl DataWriter {
         let mut writer = DataWriter {
             file,
             offset,
-            buffer: Cursor::new(Vec::new()),
+            buffer: Cursor::new(Vec::with_capacity(MAX_BLOCK_SIZE as usize)),
         };
 
         writer.file.seek(SeekFrom::Start(offset))?;
@@ -79,31 +89,41 @@ impl DataWriter {
         Ok(writer)
     }
 
-    pub fn append<'a, I>(&mut self, block: I, compression: Compression) -> Result<u64, Error>
+    pub fn append<'a, I>(&mut self, entries: I, compression: Compression) -> Result<u64, Error>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
-        self.buffer.set_position(0);
+        let entries: Vec<&Entry> = entries.into_iter().collect();
 
-        let entries: Vec<&Entry> = block.into_iter().collect();
+        if entries.len() > MAX_ENTRIES_PER_BLOCK {
+            return Err(Error::TooManyEntries);
+        }
+
+        self.buffer.set_position(0);
 
         compression.write(&entries, &mut self.buffer)?;
 
-        let block_size = self.buffer.position();
+        let payload_size = self.buffer.position();
+
+        let next_offset = self.offset + payload_size + BLOCK_HEADER_SIZE;
+
+        if next_offset > MAX_DATA_FILE_SIZE as u64 {
+            return Err(Error::DataFileTooBig);
+        }
 
         let block_header = BlockHeader {
-            entries_count: entries.len() as u32,
+            entries_count: entries.len() as u16,
             compression,
-            payload_size: block_size as u32,
+            payload_size: payload_size as u32,
         };
 
         block_header.write(&mut self.file)?;
 
-        let block_payload = &self.buffer.get_ref()[0..block_size as usize];
+        let block_payload = &self.buffer.get_ref()[0..payload_size as usize];
 
         self.file.write_all(block_payload)?;
 
-        self.offset += block_size + BLOCK_HEADER_SIZE;
+        self.offset = next_offset;
 
         Ok(self.offset)
     }
@@ -193,7 +213,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_read_write() -> Result<(), Error>{
+    fn test_read_write() -> Result<(), Error> {
         let fs = &file_system::open_temp()?;
         let series_dir = fs.series("series1")?;
 
@@ -226,15 +246,65 @@ mod test {
         Ok(())
     }
 
-    // #[test]
-    // fn test_small_buf() -> Result<(), Error> {
-    //     let fs = file_system::open_temp()?;
-    //     let series_dir = fs.series("series1")?;
+    fn entries(count: usize) -> Vec<Entry> {
+        (0..count)
+            .into_iter()
+            .map(|_| Entry { ts: 1, value: 0.0 })
+            .collect::<Vec<Entry>>()
+    }
 
-    //     {
-    //         let file = series_dir.open(FileKind::Data, OpenMode::Write)?;
-    //         let mut writer = DataWriter::create(file, 0)?;
-            
-    //     }
-    // }
+    #[test]
+    fn test_max_entries() -> Result<(), Error> {
+        let fs = &file_system::open_temp()?;
+        let series_dir = fs.series("series1")?;
+
+        {
+            let file = series_dir.open(FileKind::Data, OpenMode::Write)?;
+            let mut writer = DataWriter::create(file, 0)?;
+
+            assert!(
+                match writer.append(&entries(MAX_ENTRIES_PER_BLOCK), Compression::None) {
+                    Ok(_) => true,
+                    _ => false,
+                }
+            );
+
+            assert!(
+                match writer.append(&entries(MAX_ENTRIES_PER_BLOCK + 1), Compression::None) {
+                    Err(Error::TooManyEntries) => true,
+                    _ => false,
+                }
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_max_data_file_size() -> Result<(), Error> {
+        let fs = &file_system::open_temp()?;
+        let series_dir = fs.series("series1")?;
+
+        {
+            let file = series_dir.open(FileKind::Data, OpenMode::Write)?;
+            let mut writer = DataWriter::create(file, 0)?;
+
+            let entries = entries(MAX_ENTRIES_PER_BLOCK);
+
+            for _ in 1..=10 {
+                assert!(match writer.append(&entries, Compression::None) {
+                    Ok(_) => true,
+                    Err(Error::DataFileTooBig) => true,
+                    _ => false,
+                });
+            }
+
+            assert!(match writer.append(&entries, Compression::None) {
+                Err(Error::DataFileTooBig) => true,
+                _ => false,
+            });
+        }
+
+        Ok(())
+    }
 }

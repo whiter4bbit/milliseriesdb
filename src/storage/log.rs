@@ -13,7 +13,7 @@ use super::io_utils::{ReadBytes, WriteBytes};
 pub struct LogEntry {
     pub data_offset: u64,
     pub index_offset: u64,
-    pub highest_ts: u64,
+    pub highest_ts: i64,
 }
 
 #[allow(dead_code)]
@@ -40,7 +40,7 @@ impl LogEntry {
         let entry = LogEntry {
             data_offset: read.read_u64()?,
             index_offset: read.read_u64()?,
-            highest_ts: read.read_u64()?,
+            highest_ts: read.read_i64()?,
         };
 
         let checksum = read.read_u32()?;
@@ -54,7 +54,7 @@ impl LogEntry {
     fn write_entry<W: Write>(&self, write: &mut W) -> Result<(), Error> {
         write.write_u64(&self.data_offset)?;
         write.write_u64(&self.index_offset)?;
-        write.write_u64(&self.highest_ts)?;
+        write.write_i64(&self.highest_ts)?;
         write.write_u32(&self.checksum())?;
         Ok(())
     }
@@ -304,7 +304,7 @@ mod test {
         LogEntry {
             data_offset: seq,
             index_offset: 1000 + seq,
-            highest_ts: 2000 + seq,
+            highest_ts: 2000 + seq as i64,
         }
     }
 

@@ -7,9 +7,9 @@ use milliseriesdb::query::{Aggregation, QueryBuilder, Row, Statement, StatementE
 use milliseriesdb::storage::{error::Error, Entry, SeriesReader, SeriesTable, SeriesWriter};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::{Infallible, TryFrom};
-use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::io;
 use warp::{http::Response, http::StatusCode, Filter};
 
 mod restapi {
@@ -167,12 +167,13 @@ mod restapi {
     {
         let mut csv = csv::ChunkedReader::new();
         let mut body = body.boxed();
+        let mut entries_count = 0usize;
         while let Some(Ok(mut chunk)) = body.next().await {
             let entries = &mut csv.read(&mut chunk);
 
             loop {
                 let batch = entries
-                    .take(100)
+                    .take(1024 * 1024)
                     .collect::<Result<Vec<Entry>, ()>>()
                     .map_err(|_| io::Error::new(io::ErrorKind::Other, "Can not read entries"))?;
 
@@ -180,9 +181,14 @@ mod restapi {
                     break;
                 }
 
+                entries_count += batch.len();
+
                 writer.append_async(batch).await?;
+
+                log::debug!("Imported {} entries", entries_count);
             }
         }
+        log::debug!("Import completed, imported {} entries", entries_count);
         Ok(())
     }
 
