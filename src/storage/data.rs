@@ -2,7 +2,7 @@ use crc::crc32;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::{self, Cursor, SeekFrom};
+use std::io::{Cursor, SeekFrom};
 
 use super::compression::Compression;
 use super::entry::Entry;
@@ -50,7 +50,7 @@ impl BlockHeader {
 
         Ok(header)
     }
-    fn write(&self, file: &mut File) -> io::Result<()> {
+    fn write(&self, file: &mut File) -> Result<(), Error> {
         file.write_u32(&self.entries_count)?;
         file.write_u8(&(self.compression.marker()))?;
         file.write_u32(&self.payload_size)?;
@@ -67,7 +67,7 @@ pub struct DataWriter {
 }
 
 impl DataWriter {
-    pub fn create(file: File, offset: u64) -> io::Result<DataWriter> {
+    pub fn create(file: File, offset: u64) -> Result<DataWriter, Error> {
         let mut writer = DataWriter {
             file,
             offset,
@@ -79,7 +79,7 @@ impl DataWriter {
         Ok(writer)
     }
 
-    pub fn append<'a, I>(&mut self, block: I, compression: Compression) -> io::Result<u64>
+    pub fn append<'a, I>(&mut self, block: I, compression: Compression) -> Result<u64, Error>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
@@ -107,8 +107,9 @@ impl DataWriter {
 
         Ok(self.offset)
     }
-    pub fn sync(&mut self) -> io::Result<()> {
-        self.file.sync_data()
+    pub fn sync(&mut self) -> Result<(), Error> {
+        self.file.sync_data()?;
+        Ok(())
     }
 }
 
@@ -224,4 +225,16 @@ mod test {
 
         Ok(())
     }
+
+    // #[test]
+    // fn test_small_buf() -> Result<(), Error> {
+    //     let fs = file_system::open_temp()?;
+    //     let series_dir = fs.series("series1")?;
+
+    //     {
+    //         let file = series_dir.open(FileKind::Data, OpenMode::Write)?;
+    //         let mut writer = DataWriter::create(file, 0)?;
+            
+    //     }
+    // }
 }

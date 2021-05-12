@@ -1,6 +1,6 @@
+use super::error::Error;
 use super::file_system::FileSystem;
 use super::{SeriesReader, SeriesWriter, SyncMode};
-use super::error::Error;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time;
@@ -17,10 +17,7 @@ impl TableEntry {
         sync_mode: SyncMode,
     ) -> Result<TableEntry, Error> {
         Ok(TableEntry {
-            writer: Arc::new(SeriesWriter::create_opt(
-                fs.series(name.as_ref())?,
-                sync_mode,
-            )?),
+            writer: Arc::new(SeriesWriter::create(fs.series(name.as_ref())?)?),
             reader: Arc::new(SeriesReader::create(fs.series(name.as_ref())?)?),
         })
     }
@@ -65,7 +62,6 @@ impl SeriesTable {
     }
     pub fn rename<S: AsRef<str>>(&self, src: S, dst: S) -> Result<bool, Error> {
         let mut entries = self.entries.lock().unwrap();
-        
         if !entries.contains_key(src.as_ref()) || entries.contains_key(dst.as_ref()) {
             return Ok(false);
         }

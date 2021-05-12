@@ -9,11 +9,8 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Copy, Clone)]
 pub enum SyncMode {
-    #[allow(dead_code)]
     Paranoid,
-    #[allow(dead_code)]
     Never,
-    #[allow(dead_code)]
     Every(u16),
 }
 
@@ -21,22 +18,27 @@ struct SeriesWriterInterior {
     data_writer: DataWriter,
     index_writer: IndexWriter,
     log_writer: LogWriter,
-    last_log_entry: LogEntry,
     sync_mode: SyncMode,
     writes: u64,
+    max_entries_per_block: u32,
+    data_offset: u64,
+    highest_ts: u64,
 }
 
 impl SeriesWriterInterior {
     fn create(dir: Arc<SeriesDir>) -> Result<SeriesWriterInterior, Error> {
-        SeriesWriterInterior::create_opt(dir, SyncMode::Paranoid)
+        SeriesWriterInterior::create_opt(dir, SyncMode::Paranoid, 128, 1024 * 1024)
     }
-    #[allow(dead_code)]
-    fn create_opt(dir: Arc<SeriesDir>, sync_mode: SyncMode) -> Result<SeriesWriterInterior, Error> {
+    fn create_opt(
+        dir: Arc<SeriesDir>,
+        sync_mode: SyncMode,
+        max_entries_per_block: u32,
+        max_log_segment_size: u32,
+    ) -> Result<SeriesWriterInterior, Error> {
         let log_reader = LogReader::create(dir.clone());
+        let last_entry = &log_reader.get_last_entry_or_default()?;
 
-        let last_entry = log_reader.get_last_entry_or_default()?;
-
-        let mut log_writer = LogWriter::create(dir.clone(), 1024 * 1024)?;
+        let mut log_writer = LogWriter::create(dir.clone(), max_log_segment_size as u64)?;
         log_writer.append(&last_entry)?;
         log_writer.sync()?;
 
@@ -50,23 +52,28 @@ impl SeriesWriterInterior {
                 last_entry.index_offset,
             )?,
             log_writer,
-            last_log_entry: last_entry,
             sync_mode,
             writes: 0,
+            max_entries_per_block: max_entries_per_block,
+            data_offset: last_entry.data_offset,
+            highest_ts: last_entry.highest_ts,
         })
     }
     fn fsync(&mut self) -> Result<(), Error> {
         self.writes += 1;
+
         let should_sync = match self.sync_mode {
             SyncMode::Paranoid => true,
             SyncMode::Every(p) if p > 0 && self.writes % p as u64 == 0 => true,
             _ => false,
         };
+
         if should_sync {
             self.data_writer.sync()?;
             self.index_writer.sync()?;
             self.log_writer.sync()?;
         }
+
         Ok(())
     }
 
@@ -77,38 +84,57 @@ impl SeriesWriterInterior {
         self.append_opt(batch, Compression::Delta)
     }
 
-    #[allow(dead_code)]
-    fn append_opt<'a, I>(&mut self, batch: I, compression: Compression) -> Result<(), Error>
+    fn process_entries<'a, I>(&mut self, entries: I) -> Vec<&'a Entry>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
-        let mut ordered: Vec<&Entry> = batch
+        let mut entries: Vec<&Entry> = entries
             .into_iter()
-            .filter(|entry| entry.ts >= self.last_log_entry.highest_ts)
+            .filter(|entry| entry.ts >= self.highest_ts)
             .collect();
-        ordered.sort_by_key(|entry| entry.ts);
-        if ordered.is_empty() {
-            return Ok(());
-        }
+        entries.sort_by_key(|entry| entry.ts);
+        entries
+    }
 
-        let last_entry_ts = ordered.last().unwrap().ts;
-
-        let index_offset = self
-            .index_writer
-            .append(last_entry_ts, self.last_log_entry.data_offset)?;
-
-        let data_offset = self.data_writer.append(ordered, compression)?;
-        let last_log_entry = LogEntry {
-            data_offset,
-            index_offset,
-            highest_ts: last_entry_ts,
+    fn append_block<'a>(&mut self, block: Vec<&'a Entry>, compression: Compression) -> Result<(), Error>
+    {
+        let highest_ts = match block.last() {
+            Some(entry) => entry.ts,
+            _ => return Ok(()),
         };
 
-        self.log_writer.append(&last_log_entry)?;
-        self.last_log_entry = last_log_entry;
+        let index_offset = self.index_writer.append(highest_ts, self.data_offset)?;
+        let data_offset = self.data_writer.append(block, compression)?;
+
+        self.log_writer.append(&LogEntry {
+            data_offset,
+            index_offset,
+            highest_ts,
+        })?;
+
+        self.data_offset = data_offset;
+        self.highest_ts = highest_ts;
 
         self.fsync()?;
+
         Ok(())
+    }
+
+    fn append_opt<'a, I>(&mut self, entries: I, compression: Compression) -> Result<(), Error>
+    where
+        I: IntoIterator<Item = &'a Entry> + 'a,
+    {
+        let iter = &mut self.process_entries(entries).into_iter();
+        
+        loop {
+            let block: Vec<&'a Entry> = iter.take(self.max_entries_per_block as usize).collect();
+
+            if block.is_empty() {
+                return Ok(())
+            }
+
+            self.append_block(block, compression.clone())?;
+        }
     }
 }
 
@@ -127,9 +153,16 @@ impl SeriesWriter {
     pub fn create_opt(
         dir: Arc<SeriesDir>,
         sync_mode: SyncMode,
+        max_entries_per_block: u32,
+        max_log_segment_size: u32,
     ) -> Result<SeriesWriter, Error> {
         Ok(SeriesWriter {
-            writer: Arc::new(Mutex::new(SeriesWriterInterior::create_opt(dir, sync_mode)?)),
+            writer: Arc::new(Mutex::new(SeriesWriterInterior::create_opt(
+                dir,
+                sync_mode,
+                max_entries_per_block,
+                max_log_segment_size,
+            )?)),
         })
     }
 
@@ -149,10 +182,7 @@ impl SeriesWriter {
         writer.append_opt(batch, compression)
     }
 
-    pub async fn append_async(
-        &self,
-        batch: Vec<Entry>
-    ) -> Result<(), Error> {
+    pub async fn append_async(&self, batch: Vec<Entry>) -> Result<(), Error> {
         let writer = self.writer.clone();
         tokio::task::spawn_blocking(move || {
             let mut writer = writer.lock().unwrap();
