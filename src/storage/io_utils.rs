@@ -50,6 +50,11 @@ pub trait ReadBytes: Read {
         self.read_exact(&mut buf)?;
         Ok(f64::from_be_bytes(buf))
     }
+    fn read_u16(&mut self) -> io::Result<u16> {
+        let mut buf = [0u8; 2];
+        self.read_exact(&mut buf)?;
+        Ok(u16::from_be_bytes(buf))
+    }
     fn read_u32(&mut self) -> io::Result<u32> {
         let mut buf = [0u8; 4];
         self.read_exact(&mut buf)?;

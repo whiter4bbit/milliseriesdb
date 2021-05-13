@@ -1,6 +1,6 @@
 use clap::clap_app;
 use milliseriesdb::query::StatementExpr;
-use milliseriesdb::storage::{file_system, series_table, Compression};
+use milliseriesdb::storage::{file_system, env, series_table, Compression};
 use std::sync::Arc;
 
 mod append;
@@ -49,7 +49,8 @@ async fn main() {
 
     let fs = file_system::open(matches.value_of("path").unwrap()).unwrap();
 
-    let series_table = series_table::create(fs).unwrap();
+    let env = env::create(fs);
+    let series_table = series_table::create(env).unwrap();
 
     match matches.subcommand() {
         ("append", Some(sub_match)) => append::append(

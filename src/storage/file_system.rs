@@ -4,18 +4,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub enum FileKind {
-    #[allow(dead_code)]
     Data,
-    #[allow(dead_code)]
     Index,
-    #[allow(dead_code)]
     Log(u64),
 }
 
 pub enum OpenMode {
-    #[allow(dead_code)]
     Read,
-    #[allow(dead_code)]
     Write,
 }
 

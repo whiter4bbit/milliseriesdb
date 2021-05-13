@@ -4,7 +4,6 @@ use crate::storage::error::Error;
 use serde_derive::{Deserialize, Serialize};
 use super::statement::Statement;
 use std::time::SystemTime;
-use strength_reduce::StrengthReducedU64;
 use super::group_by::GroupBy;
 use std::convert::From;
 
@@ -58,7 +57,7 @@ where
             folder: folder,
             current: None,
             iterations: 0,
-            granularity: StrengthReducedU64::new(self.statement.group_by),
+            granularity: self.statement.group_by,
         };
 
         let start_ts = SystemTime::now();

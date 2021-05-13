@@ -77,19 +77,19 @@ pub struct DataWriter {
 }
 
 impl DataWriter {
-    pub fn create(file: File, offset: u64) -> Result<DataWriter, Error> {
+    pub fn create(file: File, offset: u32) -> Result<DataWriter, Error> {
         let mut writer = DataWriter {
             file,
-            offset,
+            offset: offset as u64,
             buffer: Cursor::new(Vec::with_capacity(MAX_BLOCK_SIZE as usize)),
         };
 
-        writer.file.seek(SeekFrom::Start(offset))?;
+        writer.file.seek(SeekFrom::Start(offset as u64))?;
 
         Ok(writer)
     }
 
-    pub fn append<'a, I>(&mut self, entries: I, compression: Compression) -> Result<u64, Error>
+    pub fn append<'a, I>(&mut self, entries: I, compression: Compression) -> Result<u32, Error>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
@@ -125,7 +125,7 @@ impl DataWriter {
 
         self.offset = next_offset;
 
-        Ok(self.offset)
+        Ok(self.offset as u32)
     }
     pub fn sync(&mut self) -> Result<(), Error> {
         self.file.sync_data()?;
@@ -142,16 +142,16 @@ pub struct DataReader {
 }
 
 impl DataReader {
-    pub fn create(file: File, start_offset: u64) -> Result<DataReader, Error> {
+    pub fn create(file: File, start_offset: u32) -> Result<DataReader, Error> {
         let mut reader = DataReader {
             file: file,
             buf: vec![0u8; 5 * 1024 * 1024],
             buf_pos: 0,
             buf_len: 0,
-            offset: start_offset,
+            offset: start_offset as u64,
         };
 
-        reader.file.seek(SeekFrom::Start(start_offset))?;
+        reader.file.seek(SeekFrom::Start(start_offset as u64))?;
 
         Ok(reader)
     }
@@ -175,7 +175,7 @@ impl DataReader {
         Ok(())
     }
 
-    pub fn read_block(&mut self) -> Result<(Vec<Entry>, u64), Error> {
+    pub fn read_block(&mut self) -> Result<(Vec<Entry>, u32), Error> {
         if self.buf_len - self.buf_pos < BLOCK_HEADER_SIZE as usize {
             self.refill()?;
         }
@@ -203,7 +203,7 @@ impl DataReader {
 
         self.offset += header.payload_size as u64 + BLOCK_HEADER_SIZE;
 
-        Ok((entries, self.offset))
+        Ok((entries, self.offset as u32))
     }
 }
 

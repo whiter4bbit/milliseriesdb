@@ -1,13 +1,14 @@
 mod compression;
 mod data;
 mod entry;
-pub mod file_system;
 mod index;
 mod io_utils;
-mod log;
 mod series;
+mod commit_log;
+pub mod file_system;
 pub mod series_table;
 pub mod error;
+pub mod env;
 
 pub use compression::Compression;
 pub use entry::Entry;

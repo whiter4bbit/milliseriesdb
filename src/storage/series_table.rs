@@ -1,5 +1,5 @@
 use super::error::Error;
-use super::file_system::FileSystem;
+use super::env::Env;
 use super::{SeriesReader, SeriesWriter};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -12,18 +12,18 @@ struct TableEntry {
 
 impl TableEntry {
     pub fn open_or_create<S: AsRef<str>>(
-        fs: &FileSystem,
+        env: &Env,
         name: S
     ) -> Result<TableEntry, Error> {
         Ok(TableEntry {
-            writer: Arc::new(SeriesWriter::create(fs.series(name.as_ref())?)?),
-            reader: Arc::new(SeriesReader::create(fs.series(name.as_ref())?)?),
+            writer: Arc::new(SeriesWriter::create(env.series(name.as_ref())?)?),
+            reader: Arc::new(SeriesReader::create(env.series(name.as_ref())?)?),
         })
     }
 }
 
 pub struct SeriesTable {
-    fs: FileSystem,
+    env: Env,
     entries: Arc<Mutex<HashMap<String, Arc<TableEntry>>>>,
 }
 
@@ -42,7 +42,7 @@ impl SeriesTable {
             return Ok(());
         }
 
-        let entry = TableEntry::open_or_create(&self.fs, &name)?;
+        let entry = TableEntry::open_or_create(&self.env, &name)?;
         entries.insert(name.as_ref().to_owned(), Arc::new(entry));
 
         Ok(())
@@ -64,30 +64,30 @@ impl SeriesTable {
             return Ok(false);
         }
 
-        self.fs.rename_series(src.as_ref(), dst.as_ref())?;
+        self.env.fs().rename_series(src.as_ref(), dst.as_ref())?;
 
         {
             entries.remove(src.as_ref());
         }
 
-        let entry = TableEntry::open_or_create(&self.fs, dst.as_ref())?;
+        let entry = TableEntry::open_or_create(&self.env, dst.as_ref())?;
         entries.insert(dst.as_ref().to_owned(), Arc::new(entry));
 
         Ok(true)
     }
 }
 
-pub fn create(fs: FileSystem) -> Result<SeriesTable, Error> {
+pub fn create(env: Env) -> Result<SeriesTable, Error> {
     let mut entries = HashMap::new();
-    for name in fs.get_series()? {
+    for name in env.fs().get_series()? {
         entries.insert(
             name.to_owned(),
-            Arc::new(TableEntry::open_or_create(&fs, &name)?),
+            Arc::new(TableEntry::open_or_create(&env, &name)?),
         );
     }
 
     Ok(SeriesTable {
-        fs,
+        env,
         entries: Arc::new(Mutex::new(entries)),
     })
 }

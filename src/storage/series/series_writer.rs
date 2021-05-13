@@ -1,55 +1,39 @@
+use super::super::commit_log::Commit;
 use super::super::data::{self, DataWriter};
 use super::super::entry::Entry;
+use super::super::env::SeriesEnv;
 use super::super::error::Error;
-use super::super::file_system::{FileKind, OpenMode, SeriesDir};
+use super::super::file_system::{FileKind, OpenMode};
 use super::super::index::IndexWriter;
-use super::super::log::{LogEntry, LogReader, LogWriter};
 use super::super::Compression;
 use std::sync::{Arc, Mutex};
 
 struct SeriesWriterInterior {
     data_writer: DataWriter,
     index_writer: IndexWriter,
-    log_writer: LogWriter,
-    data_offset: u64,
-    highest_ts: i64,
+    env: Arc<SeriesEnv>,
 }
 
 impl SeriesWriterInterior {
-    fn create(dir: Arc<SeriesDir>) -> Result<SeriesWriterInterior, Error> {
-        SeriesWriterInterior::create_opt(dir, 1024 * 1024)
-    }
-
-    fn create_opt(
-        dir: Arc<SeriesDir>,
-        max_log_segment_size: u32,
-    ) -> Result<SeriesWriterInterior, Error> {
-        let log_reader = LogReader::create(dir.clone());
-        let last_entry = &log_reader.get_last_entry_or_default()?;
-
-        let mut log_writer = LogWriter::create(dir.clone(), max_log_segment_size as u64)?;
-        log_writer.append(&last_entry)?;
-        log_writer.sync()?;
+    fn create(env: Arc<SeriesEnv>) -> Result<SeriesWriterInterior, Error> {
+        let last_commit = env.commit_log().current();
 
         Ok(SeriesWriterInterior {
             data_writer: DataWriter::create(
-                dir.open(FileKind::Data, OpenMode::Write)?,
-                last_entry.data_offset,
+                env.dir().open(FileKind::Data, OpenMode::Write)?,
+                last_commit.data_offset,
             )?,
             index_writer: IndexWriter::open(
-                dir.open(FileKind::Index, OpenMode::Write)?,
-                last_entry.index_offset,
+                env.dir().open(FileKind::Index, OpenMode::Write)?,
+                last_commit.index_offset as u64,
             )?,
-            log_writer,
-            data_offset: last_entry.data_offset,
-            highest_ts: last_entry.highest_ts,
+            env: env,
         })
     }
 
     fn fsync(&mut self) -> Result<(), Error> {
         self.data_writer.sync()?;
         self.index_writer.sync()?;
-        self.log_writer.sync()?;
 
         Ok(())
     }
@@ -58,9 +42,11 @@ impl SeriesWriterInterior {
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
+        let highest_ts = self.env.commit_log().current().highest_ts;
+
         let mut entries: Vec<&Entry> = entries
             .into_iter()
-            .filter(|entry| entry.ts >= self.highest_ts)
+            .filter(|entry| entry.ts >= highest_ts)
             .collect();
         entries.sort_by_key(|entry| entry.ts);
         entries
@@ -76,17 +62,18 @@ impl SeriesWriterInterior {
             _ => return Ok(()),
         };
 
-        let index_offset = self.index_writer.append(highest_ts, self.data_offset)?;
+        let index_offset = self.index_writer.append(
+            highest_ts,
+            self.env.commit_log().current().data_offset as u64,
+        )?;
+        
         let data_offset = self.data_writer.append(block, compression)?;
 
-        self.log_writer.append(&LogEntry {
-            data_offset,
-            index_offset,
-            highest_ts,
+        self.env.commit_log().commit(Commit {
+            data_offset: data_offset as u32,
+            index_offset: index_offset as u32,
+            highest_ts: highest_ts,
         })?;
-
-        self.data_offset = data_offset;
-        self.highest_ts = highest_ts;
 
         self.fsync()?;
 
@@ -123,21 +110,9 @@ pub struct SeriesWriter {
 }
 
 impl SeriesWriter {
-    pub fn create(dir: Arc<SeriesDir>) -> Result<SeriesWriter, Error> {
+    pub fn create(env: Arc<SeriesEnv>) -> Result<SeriesWriter, Error> {
         Ok(SeriesWriter {
-            writer: Arc::new(Mutex::new(SeriesWriterInterior::create(dir)?)),
-        })
-    }
-
-    pub fn create_opt(
-        dir: Arc<SeriesDir>,
-        max_log_segment_size: u32,
-    ) -> Result<SeriesWriter, Error> {
-        Ok(SeriesWriter {
-            writer: Arc::new(Mutex::new(SeriesWriterInterior::create_opt(
-                dir,
-                max_log_segment_size,
-            )?)),
+            writer: Arc::new(Mutex::new(SeriesWriterInterior::create(env)?)),
         })
     }
 

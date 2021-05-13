@@ -1,5 +1,4 @@
 use crate::storage::{error::Error, Entry};
-use strength_reduce::StrengthReducedU64;
 
 pub trait Folder {
     type Result;
@@ -14,7 +13,7 @@ where
 {
     pub iterator: I,
     pub folder: F,
-    pub granularity: StrengthReducedU64,
+    pub granularity: u64,
     pub current: Option<Entry>,
     pub iterations: usize,
 }
@@ -25,7 +24,7 @@ where
     F: Folder,
 {
     fn key(&self, entry: &Entry) -> i64 {
-        entry.ts - (entry.ts % (self.granularity.get() as i64))
+        entry.ts - (entry.ts.rem_euclid(self.granularity as i64))
     }
 }
 

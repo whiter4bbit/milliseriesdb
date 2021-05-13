@@ -8,7 +8,7 @@ pub use series_writer::SeriesWriter;
 mod test {
     use super::super::entry::Entry;
     use super::super::error::Error;
-    use super::super::file_system;
+    use super::super::env;
     use super::*;
 
     fn entry(ts: i64, value: f64) -> Entry {
@@ -17,8 +17,8 @@ mod test {
 
     #[test]
     fn test_series_read_write() -> Result<(), Error> {
-        let file_system = &file_system::open_temp()?;
-        let series_dir = file_system.series("series1")?;
+        let env = env::create_temp()?;
+        let series_env = env.series("series1")?;
 
         let entries = [
             entry(1, 11.0),
@@ -36,13 +36,13 @@ mod test {
             entry(140, 1140.0),
         ];
         {
-            let writer = SeriesWriter::create(series_dir.clone())?;
+            let writer = SeriesWriter::create(series_env.clone())?;
             writer.append(&entries[0..5])?;
             writer.append(&entries[5..8])?;
             writer.append(&entries[8..11])?;
         }
 
-        let reader = SeriesReader::create(series_dir.clone())?;
+        let reader = SeriesReader::create(series_env.clone())?;
         assert_eq!(
             entries[3..11].to_vec(),
             reader.iterator(4)?.collect::<Result<Vec<Entry>, Error>>()?
@@ -59,7 +59,7 @@ mod test {
         );
 
         {
-            let writer = SeriesWriter::create(series_dir)?;
+            let writer = SeriesWriter::create(series_env.clone())?;
             writer.append(&entries[11..13])?;
         }
 
