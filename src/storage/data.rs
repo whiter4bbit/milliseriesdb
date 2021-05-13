@@ -209,13 +209,14 @@ impl DataReader {
 
 #[cfg(test)]
 mod test {
-    use super::super::file_system::{self, FileKind, OpenMode};
+    use super::super::file_system::{FileKind, OpenMode};
+    use super::super::env;
     use super::*;
 
     #[test]
     fn test_read_write() -> Result<(), Error> {
-        let fs = &file_system::open_temp()?;
-        let series_dir = fs.series("series1")?;
+        let env = env::test::create()?;        
+        let series_dir = env.fs().series("series1")?;
 
         let entries = vec![
             Entry { ts: 1, value: 11.0 },
@@ -255,8 +256,8 @@ mod test {
 
     #[test]
     fn test_max_entries() -> Result<(), Error> {
-        let fs = &file_system::open_temp()?;
-        let series_dir = fs.series("series1")?;
+        let env = env::test::create()?;        
+        let series_dir = env.fs().series("series1")?;
 
         {
             let file = series_dir.open(FileKind::Data, OpenMode::Write)?;
@@ -282,8 +283,8 @@ mod test {
 
     #[test]
     fn test_max_data_file_size() -> Result<(), Error> {
-        let fs = &file_system::open_temp()?;
-        let series_dir = fs.series("series1")?;
+        let env = env::test::create()?;        
+        let series_dir = env.fs().series("series1")?;
 
         {
             let file = series_dir.open(FileKind::Data, OpenMode::Write)?;

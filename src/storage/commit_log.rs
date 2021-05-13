@@ -208,7 +208,7 @@ mod test_interior {
 
     #[test]
     fn test_basic() -> Result<(), Error> {
-        let fs = file_system::open_temp()?;
+        let fs = file_system::test::open()?;
         let dir = fs.series("series1")?;
 
         {
@@ -252,7 +252,7 @@ mod test_interior {
 
     #[test]
     fn test_rotate() -> Result<(), Error> {
-        let fs = file_system::open_temp()?;
+        let fs = file_system::test::open()?;
         let dir = fs.series("series1")?;
 
         let mut log = Interior::open(dir.clone())?;

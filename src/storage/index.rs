@@ -84,13 +84,14 @@ impl IndexReader {
 
 #[cfg(test)]
 mod test {
-    use super::super::file_system::{self, FileKind, OpenMode};
+    use super::super::file_system::{FileKind, OpenMode};
+    use super::super::env;
     use super::*;
 
     #[test]
     fn test_ceiling() -> Result<(), Error> {
-        let fs = &file_system::open_temp()?;
-        let series_dir = fs.series("series1")?;
+        let env = env::test::create()?;
+        let series_dir = env.fs().series("series1")?;
 
         let offset = {
             let file = series_dir.open(FileKind::Index, OpenMode::Write)?;

@@ -99,44 +99,41 @@ pub fn open<P: AsRef<Path>>(base_path: P) -> Result<FileSystem, Error> {
 }
 
 #[cfg(test)]
-use std::time::{SystemTime, UNIX_EPOCH};
+pub mod test {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::ops::Deref;
 
-#[cfg(test)]
-use std::ops::Deref;
-
-#[cfg(test)]
-pub struct TempFS {
-    pub fs: FileSystem,
-    path: PathBuf,
-}
-
-#[cfg(test)]
-impl Drop for TempFS {
-    fn drop(&mut self) {
-        fs::remove_dir_all(&self.path).unwrap();
+    pub struct TempFS {
+        pub fs: FileSystem,
+        path: PathBuf,
     }
-}
 
-#[cfg(test)]
-impl Deref for TempFS {
-    type Target = FileSystem;
-    fn deref(&self) -> &Self::Target {
-        &self.fs
+    impl Drop for TempFS {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.path).unwrap();
+        }
     }
-}
 
-#[cfg(test)]
-pub fn open_temp() -> Result<TempFS, Error> {
-    let path = PathBuf::from(format!(
-        "temp-dir-{:?}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    impl Deref for TempFS {
+        type Target = FileSystem;
+        fn deref(&self) -> &Self::Target {
+            &self.fs
+        }
+    }
 
-    Ok(TempFS {        
-        fs: open(&path)?,
-        path: path.clone(),
-    })
+    pub fn open() -> Result<TempFS, Error> {
+        let path = PathBuf::from(format!(
+            "temp-dir-{:?}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        Ok(TempFS {
+            fs: super::open(&path)?,
+            path: path.clone(),
+        })
+    }
 }

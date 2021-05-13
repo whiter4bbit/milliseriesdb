@@ -50,54 +50,49 @@ impl Env {
 pub fn create(fs: FileSystem) -> Env {
     Env {
         fs: fs,
-        series: Arc::new(Mutex::new(HashMap::new()))
+        series: Arc::new(Mutex::new(HashMap::new())),
     }
 }
 
 #[cfg(test)]
-use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(test)]
-use std::path::PathBuf;
-#[cfg(test)]
-use std::ops::Deref;
-#[cfg(test)]
-use std::fs;
-#[cfg(test)]
-use super::file_system;
+pub mod test {
+    use super::*;
+    use super::super::file_system;
+    use std::fs;
+    use std::ops::Deref;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(test)]
-pub struct TempEnv {
-    pub env: Env,
-    path: PathBuf,
-}
-
-#[cfg(test)]
-impl Drop for TempEnv {
-    fn drop(&mut self) {
-        fs::remove_dir_all(&self.path).unwrap();
+    pub struct TempEnv {
+        pub env: Env,
+        path: PathBuf,
     }
-}
 
-#[cfg(test)]
-impl Deref for TempEnv {
-    type Target = Env;
-    fn deref(&self) -> &Self::Target {
-        &self.env
+    impl Drop for TempEnv {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.path).unwrap();
+        }
     }
-}
 
-#[cfg(test)]
-pub fn create_temp() -> Result<TempEnv, Error> {
-    let path = PathBuf::from(format!(
-        "temp-dir-{:?}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    impl Deref for TempEnv {
+        type Target = Env;
+        fn deref(&self) -> &Self::Target {
+            &self.env
+        }
+    }
 
-    Ok(TempEnv {        
-        env: create(file_system::open(&path)?),
-        path: path.clone(),
-    })
+    pub fn create() -> Result<TempEnv, Error> {
+        let path = PathBuf::from(format!(
+            "temp-dir-{:?}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        Ok(TempEnv {
+            env: super::create(file_system::open(&path)?),
+            path: path.clone(),
+        })
+    }
 }

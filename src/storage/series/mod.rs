@@ -17,7 +17,7 @@ mod test {
 
     #[test]
     fn test_series_read_write() -> Result<(), Error> {
-        let env = env::create_temp()?;
+        let env = env::test::create()?;
         let series_env = env.series("series1")?;
 
         let entries = [
