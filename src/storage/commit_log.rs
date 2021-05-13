@@ -44,7 +44,7 @@ impl Commit {
         let checksum = read.read_u16()?;
 
         if checksum != commit.checksum() {
-            return Err(Error::Crc32Mismatch);
+            return Err(Error::Crc16Mismatch);
         }
 
         Ok(commit)
@@ -80,7 +80,7 @@ mod test_commit {
         buf[COMMIT_SIZE - 1] = 21;
 
         assert!(match Commit::read(&mut &buf[..]) {
-            Err(Error::Crc32Mismatch) => true,
+            Err(Error::Crc16Mismatch) => true,
             _ => false,
         });
 
@@ -112,8 +112,8 @@ impl Interior {
             let mut file = dir.open(FileKind::Log(*seq), OpenMode::Write)?;
             loop {
                 match Commit::read(&mut file) {
-                    Err(Error::Crc32Mismatch) => {
-                        log::warn!("crc32 mismatch in log {:?}", &file);
+                    Err(Error::Crc16Mismatch) => {
+                        log::warn!("crc16 mismatch in log {:?}", &file);
                         break;
                     }
                     Err(Error::Io(error)) => match error.kind() {

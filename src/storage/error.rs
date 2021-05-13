@@ -2,7 +2,7 @@ use std::{error, array, io, fmt};
 
 #[derive(Debug)]
 pub enum Error {
-    Crc32Mismatch,
+    Crc16Mismatch,
     UnknownCompression,
     Io(io::Error),
     Slice(array::TryFromSliceError),

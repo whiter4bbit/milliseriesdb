@@ -1,4 +1,4 @@
-use crc::crc32;
+use crc::crc16;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
@@ -9,7 +9,7 @@ use super::entry::Entry;
 use super::error::Error;
 use super::io_utils::WriteBytes;
 
-const BLOCK_HEADER_SIZE: u64 = 2 + 1 + 4 + 4;
+const BLOCK_HEADER_SIZE: u64 = 2 + 1 + 4 + 2;
 
 #[cfg(not(test))]
 const MAX_DATA_FILE_SIZE: u32 = u32::MAX;
@@ -28,13 +28,13 @@ struct BlockHeader {
 }
 
 impl BlockHeader {
-    fn checksum(&self) -> u32 {
-        let table = &crc32::IEEE_TABLE;
-        let mut checksum = 0u32;
+    fn checksum(&self) -> u16 {
+        let table = &crc16::USB_TABLE;
+        let mut checksum = 0u16;
 
-        checksum = crc32::update(checksum, table, &(self.entries_count as u64).to_le_bytes());
-        checksum = crc32::update(checksum, table, &[self.compression.marker()]);
-        checksum = crc32::update(checksum, table, &(self.payload_size as u64).to_le_bytes());
+        checksum = crc16::update(checksum, table, &(self.entries_count).to_be_bytes());
+        checksum = crc16::update(checksum, table, &[self.compression.marker()]);
+        checksum = crc16::update(checksum, table, &(self.payload_size).to_be_bytes());
 
         checksum
     }
@@ -52,10 +52,10 @@ impl BlockHeader {
             payload_size: u32::from_be_bytes(bytes[3..7].try_into()?),
         };
 
-        let checksum = u32::from_be_bytes(bytes[7..11].try_into()?);
+        let checksum = u16::from_be_bytes(bytes[7..9].try_into()?);
 
         if checksum != header.checksum() {
-            return Err(Error::Crc32Mismatch);
+            return Err(Error::Crc16Mismatch);
         }
 
         Ok(header)
@@ -65,7 +65,7 @@ impl BlockHeader {
         file.write_u8(&(self.compression.marker()))?;
         file.write_u32(&self.payload_size)?;
 
-        file.write_u32(&self.checksum())?;
+        file.write_u16(&self.checksum())?;
         Ok(())
     }
 }
