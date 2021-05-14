@@ -4,13 +4,11 @@ use super::super::entry::Entry;
 use super::super::env::SeriesEnv;
 use super::super::error::Error;
 use super::super::file_system::{FileKind, OpenMode};
-use super::super::index::IndexWriter;
 use super::super::Compression;
 use std::sync::{Arc, Mutex};
 
 struct SeriesWriterInterior {
     data_writer: DataWriter,
-    index_writer: IndexWriter,
     env: Arc<SeriesEnv>,
 }
 
@@ -23,17 +21,13 @@ impl SeriesWriterInterior {
                 env.dir().open(FileKind::Data, OpenMode::Write)?,
                 last_commit.data_offset,
             )?,
-            index_writer: IndexWriter::open(
-                env.dir().open(FileKind::Index, OpenMode::Write)?,
-                last_commit.index_offset as u64,
-            )?,
             env: env,
         })
     }
 
     fn fsync(&mut self) -> Result<(), Error> {
         self.data_writer.sync()?;
-        self.index_writer.sync()?;
+        self.env.index().sync()?;
 
         Ok(())
     }
@@ -62,22 +56,18 @@ impl SeriesWriterInterior {
             _ => return Ok(()),
         };
 
-        let index_offset = self.index_writer.append(
-            highest_ts,
-            self.env.commit_log().current().data_offset as u64,
-        )?;
-        
-        let data_offset = self.data_writer.append(block, compression)?;
+        let commit = self.env.commit_log().current();
 
-        self.env.commit_log().commit(Commit {
-            data_offset: data_offset as u32,
-            index_offset: index_offset as u32,
-            highest_ts: highest_ts,
-        })?;
+        let index_offset = self.env.index().append(highest_ts, commit.data_offset)?;
+        let data_offset = self.data_writer.append(block, compression)?;
 
         self.fsync()?;
 
-        Ok(())
+        self.env.commit_log().commit(Commit {
+            data_offset,
+            index_offset,
+            highest_ts,
+        })
     }
 
     fn append<'a, I>(&mut self, batch: I) -> Result<(), Error>

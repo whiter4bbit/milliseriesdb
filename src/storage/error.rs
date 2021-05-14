@@ -10,6 +10,10 @@ pub enum Error {
     ArgTooSmall,
     TooManyEntries,
     DataFileTooBig,
+    InvalidOffset,
+    IndexFileTooBig,
+    OffsetOutsideTheRange,
+    OffsetIsNotAligned,
 }
 
 impl From<io::Error> for Error {

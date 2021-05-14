@@ -1,35 +1,28 @@
-use std::collections::VecDeque;
-use std::sync::Arc;
 use super::super::data::DataReader;
 use super::super::entry::Entry;
-use super::super::file_system::{FileKind, OpenMode};
-use super::super::index::IndexReader;
-use super::super::error::Error;
 use super::super::env::SeriesEnv;
+use super::super::error::Error;
+use super::super::file_system::{FileKind, OpenMode};
+use std::collections::VecDeque;
+use std::sync::Arc;
 
 pub struct SeriesReader {
-    env: Arc<SeriesEnv>
+    env: Arc<SeriesEnv>,
 }
 
 impl SeriesReader {
     pub fn create(env: Arc<SeriesEnv>) -> Result<SeriesReader, Error> {
-        Ok(SeriesReader {
-            env: env.clone()
-        })
+        Ok(SeriesReader { env: env.clone() })
     }
 
     pub fn iterator(&self, from_ts: i64) -> Result<SeriesIterator, Error> {
         let commit = self.env.commit_log().current();
 
-        let mut index_reader = IndexReader::create(
-            self.env.dir().open(FileKind::Index, OpenMode::Read)?,
-            commit.index_offset as u64,
-        )?;
-
-        let start_offset = match index_reader.ceiling_offset(from_ts)? {
-            Some(offset) => offset as u32,
-            _ => commit.data_offset,
-        };
+        let start_offset = self
+            .env
+            .index()
+            .ceiling_offset(from_ts, commit.index_offset)?
+            .unwrap_or(0);
 
         Ok(SeriesIterator {
             data_reader: DataReader::create(

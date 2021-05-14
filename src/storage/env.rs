@@ -1,19 +1,27 @@
 use super::commit_log::CommitLog;
 use super::error::Error;
-use super::file_system::{FileSystem, SeriesDir};
+use super::file_system::{FileKind, FileSystem, OpenMode, SeriesDir};
+use super::index::Index;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub struct SeriesEnv {
     dir: Arc<SeriesDir>,
     commit_log: CommitLog,
+    index: Index,
 }
 
 impl SeriesEnv {
     fn create(dir: Arc<SeriesDir>) -> Result<SeriesEnv, Error> {
+        let log = CommitLog::open(dir.clone())?;
+        let index_offset = log.current().index_offset;
         Ok(SeriesEnv {
             dir: dir.clone(),
-            commit_log: CommitLog::open(dir.clone())?,
+            commit_log: log,
+            index: Index::open(
+                dir.clone().open(FileKind::Index, OpenMode::Write)?,
+                index_offset,
+            )?,
         })
     }
     pub fn dir(&self) -> Arc<SeriesDir> {
@@ -21,6 +29,9 @@ impl SeriesEnv {
     }
     pub fn commit_log(&self) -> &CommitLog {
         &self.commit_log
+    }
+    pub fn index(&self) -> &Index {
+        &self.index
     }
 }
 
@@ -56,8 +67,8 @@ pub fn create(fs: FileSystem) -> Env {
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
     use super::super::file_system;
+    use super::*;
     use std::fs;
     use std::ops::Deref;
     use std::path::PathBuf;

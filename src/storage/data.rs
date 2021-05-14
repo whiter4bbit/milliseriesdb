@@ -12,7 +12,7 @@ use super::io_utils::WriteBytes;
 const BLOCK_HEADER_SIZE: u64 = 2 + 1 + 4 + 2;
 
 #[cfg(not(test))]
-const MAX_DATA_FILE_SIZE: u32 = u32::MAX;
+const MAX_DATA_FILE_SIZE: u32 = 2 * 1024 * 1024 * 1024;
 
 #[cfg(test)]
 const MAX_DATA_FILE_SIZE: u32 = 10 * 1024 * 1024;
