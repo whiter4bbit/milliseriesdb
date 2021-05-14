@@ -1,4 +1,5 @@
 use super::error::Error;
+use super::failpoints;
 use super::file_system::{FileKind, OpenMode, SeriesDir};
 use super::io_utils::{ReadBytes, WriteBytes};
 use crc::crc16;
@@ -52,6 +53,7 @@ impl Commit {
     fn write<W: Write>(&self, write: &mut W) -> Result<(), Error> {
         write.write_u32(&self.data_offset)?;
         write.write_u32(&self.index_offset)?;
+        failpoints::fail!("commit-log-write", io);
         write.write_i64(&self.highest_ts)?;
         write.write_u16(&self.checksum())?;
         Ok(())
@@ -100,6 +102,7 @@ struct Interior {
     seqs: VecDeque<u64>,
     current_seq: u64,
     current_size: usize,
+    failure: bool,
     writer: BufWriter<File>,
 }
 
@@ -124,6 +127,10 @@ impl Interior {
                     Ok(entry) => current = Some(entry),
                 }
             }
+
+            if let Some(_) = current {
+                break;
+            }
         }
 
         let current = current.unwrap_or(FIRST);
@@ -138,6 +145,7 @@ impl Interior {
             current_seq: current_seq,
             current_size: 0,
             seqs: seqs,
+            failure: false,
             writer: BufWriter::new(dir.open(FileKind::Log(current_seq), OpenMode::Write)?),
         };
 
@@ -157,30 +165,59 @@ impl Interior {
         }
         Ok(())
     }
+    fn start_next_seq(&mut self) -> Result<(), Error> {
+        let next_seq = self.current_seq + 1;
+
+        self.writer.flush()?;
+
+        self.writer = BufWriter::new(self.dir.open(FileKind::Log(next_seq), OpenMode::Write)?);
+
+        self.current_seq = next_seq;
+        self.current_size = 0;
+        self.seqs.push_front(next_seq);
+
+        log::debug!("write rotated {:?}", self.writer.get_ref());
+
+        Ok(())
+    }
+    fn recover_if_failed(&mut self) -> Result<(), Error> {
+        if self.failure {
+            self.start_next_seq()?;
+            self.failure = false;
+        }
+        Ok(())
+    }
     fn rotate_if_needed(&mut self) -> Result<(), Error> {
         if self.current_size < MAX_LOG_SIZE {
             return Ok(());
         }
 
-        self.current_seq += 1;
-        self.current_size = 0;
-        self.seqs.push_front(self.current_seq);
-
-        self.writer = BufWriter::new(
-            self.dir
-                .open(FileKind::Log(self.current_seq), OpenMode::Write)?,
-        );
-
+        self.start_next_seq()?;
         self.cleanup()?;
 
         Ok(())
     }
     fn commit(&mut self, commit: Commit) -> Result<(), Error> {
+        self.recover_if_failed()?;
         self.rotate_if_needed()?;
 
-        commit.write(&mut self.writer)?;
+        match commit.write(&mut self.writer) {
+            Err(error) => {
+                log::debug!("commit write failed: {:?} {:?}", error, &commit);
+                self.failure = true;
+                return Err(error);
+            }
+            _ => {}
+        };
 
-        self.writer.get_ref().sync_data()?;
+        match self.writer.flush() {
+            Err(error) => {
+                log::debug!("commit sync failed: {:?}", error);
+                self.failure = true;
+                return Err(error.into());
+            }
+            _ => {}
+        };
 
         self.current = Arc::new(commit);
         self.current_size += COMMIT_SIZE;
@@ -193,7 +230,7 @@ impl Interior {
 }
 
 #[cfg(test)]
-mod test_interior {
+mod test {
     use super::super::file_system;
     use super::*;
     use std::io::{Seek, SeekFrom};
@@ -255,13 +292,49 @@ mod test_interior {
         let fs = file_system::test::open()?;
         let dir = fs.series("series1")?;
 
-        let mut log = Interior::open(dir.clone())?;
+        {
+            let mut log = Interior::open(dir.clone())?;
 
-        for _ in 0..19 {
-            log.commit(commit(0))?;
+            for i in 0..19 {
+                log.commit(commit(i))?;
+            }
+
+            assert_eq!(vec![3u64, 2u64], dir.read_log_sequences()?);
         }
 
-        assert_eq!(vec![3u64,2u64], dir.read_log_sequences()?);
+        {
+            let log = Interior::open(dir.clone())?;
+
+            assert_eq!(Arc::new(commit(18)), log.current());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn test_recover() -> Result<(), Error> {
+        let fs = file_system::test::open()?;
+        let dir = fs.series("series1")?;
+
+        {
+            let log = CommitLog::open(dir.clone())?;
+
+            log.commit(commit(0))?;
+            log.commit(commit(1))?;
+
+            fail::cfg("commit-log-write", "return(err)")?;
+            log.commit(commit(2)).unwrap_err();
+
+            fail::remove("commit-log-write");
+            log.commit(commit(2))?;
+        }
+
+        {
+            let log = CommitLog::open(dir.clone())?;
+
+            assert_eq!(Arc::new(commit(2)), log.current());
+        }
 
         Ok(())
     }

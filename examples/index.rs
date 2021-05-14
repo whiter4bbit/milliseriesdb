@@ -1,16 +1,12 @@
-use milliseriesdb::storage::{env, error::Error, file_system};
+use milliseriesdb::storage::{env, error::Error, file_system, series_table};
 
 fn main() -> Result<(), Error> {
-    stderrlog::new()
-        .verbosity(4)
-        .init()
-        .unwrap();
+    stderrlog::new().verbosity(4).init().unwrap();
 
-    let env = env::create(file_system::open("playground/example")?);
-    let series_env = env.series("series1")?;
+    let series_table = series_table::create(env::create(file_system::open("playground/example")?))?;
+    series_table.create("t")?;
 
-    for _ in 1..3000 {
-        series_env.index().append(1, 100)?;
-    }
+    let writer = series_table.writer("t").expect("table should exist");
+
     Ok(())
 }

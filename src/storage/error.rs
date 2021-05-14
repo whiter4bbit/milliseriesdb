@@ -14,6 +14,13 @@ pub enum Error {
     IndexFileTooBig,
     OffsetOutsideTheRange,
     OffsetIsNotAligned,
+    Other(String),
+}
+
+impl From<String> for Error {
+    fn from(err: String) -> Error {
+        Error::Other(err)
+    }
 }
 
 impl From<io::Error> for Error {

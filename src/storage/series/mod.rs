@@ -7,8 +7,8 @@ pub use series_writer::SeriesWriter;
 #[cfg(test)]
 mod test {
     use super::super::entry::Entry;
-    use super::super::error::Error;
     use super::super::env;
+    use super::super::error::Error;
     use super::*;
 
     fn entry(ts: i64, value: f64) -> Entry {
@@ -67,6 +67,38 @@ mod test {
             entries[1..13].to_vec(),
             reader.iterator(2)?.collect::<Result<Vec<Entry>, Error>>()?
         );
+
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn test_fail_data() -> Result<(), Error> {
+        let env = env::test::create()?;
+        let series_env = env.series("series1")?;
+
+        {
+            let writer = SeriesWriter::create(series_env.clone())?;
+
+            writer.append(&vec![entry(1, 1.0)])?;
+
+            fail::cfg("series-writer-data", "return(err)")?;
+            writer.append(&vec![entry(2, 2.1)]).unwrap_err();
+
+            fail::cfg("series-writer-data", "off")?;
+            writer.append(&vec![entry(2, 2.2)])?;
+
+            writer.append(&vec![entry(3, 3.0)])?;
+        }
+
+        {
+            let reader = SeriesReader::create(series_env.clone())?;
+
+            assert_eq!(
+                vec![entry(1, 1.0), entry(2, 2.2), entry(3, 3.0)],
+                reader.iterator(0)?.collect::<Result<Vec<Entry>, Error>>()?
+            );
+        }
 
         Ok(())
     }

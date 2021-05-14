@@ -3,6 +3,7 @@ use super::super::data::{self, DataWriter};
 use super::super::entry::Entry;
 use super::super::env::SeriesEnv;
 use super::super::error::Error;
+use super::super::failpoints;
 use super::super::file_system::{FileKind, OpenMode};
 use super::super::Compression;
 use std::sync::{Arc, Mutex};
@@ -59,7 +60,9 @@ impl SeriesWriterInterior {
         let commit = self.env.commit_log().current();
 
         let index_offset = self.env.index().append(highest_ts, commit.data_offset)?;
+
         let data_offset = self.data_writer.append(block, compression)?;
+        failpoints::fail!("series-writer-data", io);
 
         self.fsync()?;
 

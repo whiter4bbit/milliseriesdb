@@ -5,6 +5,7 @@ mod index;
 mod io_utils;
 mod series;
 mod commit_log;
+mod failpoints;
 pub mod file_system;
 pub mod series_table;
 pub mod error;

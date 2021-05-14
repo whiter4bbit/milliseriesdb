@@ -57,11 +57,11 @@ impl Interior {
 
         Ok(())
     }
-    fn append(&mut self, ts: i64, offset: u32) -> Result<u32, Error> {
+    fn append(&mut self, ts: i64, block_offset: u32) -> Result<u32, Error> {
         self.remap_if_needed()?;
 
         self.mmap[self.offset..self.offset + 8].copy_from_slice(&ts.to_be_bytes());
-        self.mmap[self.offset + 8..self.offset + 12].copy_from_slice(&offset.to_be_bytes());
+        self.mmap[self.offset + 8..self.offset + 12].copy_from_slice(&block_offset.to_be_bytes());
 
         self.offset += ENTRY_SIZE as usize;
 
@@ -123,7 +123,6 @@ impl Interior {
 mod test_index {
     use super::super::file_system::{self, FileKind, OpenMode};
     use super::*;
-    
     #[test]
     fn test_basic() -> Result<(), Error> {
         let fs = file_system::test::open()?;
