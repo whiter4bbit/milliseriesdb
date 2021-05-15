@@ -8,14 +8,14 @@ use super::super::file_system::{FileKind, OpenMode};
 use super::super::Compression;
 use std::sync::{Arc, Mutex};
 
-struct SeriesWriterInterior {
+struct Interior {
     data_writer: DataWriter,
     env: Arc<SeriesEnv>,
 }
 
-impl SeriesWriterInterior {
-    fn create(env: Arc<SeriesEnv>) -> Result<SeriesWriterInterior, Error> {
-        Ok(SeriesWriterInterior {
+impl Interior {
+    fn create(env: Arc<SeriesEnv>) -> Result<Interior, Error> {
+        Ok(Interior {
             data_writer: DataWriter::create(env.dir().open(FileKind::Data, OpenMode::Write)?)?,
             env: env,
         })
@@ -61,7 +61,7 @@ impl SeriesWriterInterior {
 
         failpoint!(
             self.env.fp(),
-            "series_writer::index::append",
+            "series_writer::index::set",
             Err(Error::Io(std::io::Error::new(
                 std::io::ErrorKind::WriteZero,
                 "fp"
@@ -116,13 +116,13 @@ impl SeriesWriterInterior {
 
 #[derive(Clone)]
 pub struct SeriesWriter {
-    writer: Arc<Mutex<SeriesWriterInterior>>,
+    writer: Arc<Mutex<Interior>>,
 }
 
 impl SeriesWriter {
     pub fn create(env: Arc<SeriesEnv>) -> Result<SeriesWriter, Error> {
         Ok(SeriesWriter {
-            writer: Arc::new(Mutex::new(SeriesWriterInterior::create(env)?)),
+            writer: Arc::new(Mutex::new(Interior::create(env)?)),
         })
     }
 

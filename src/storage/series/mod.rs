@@ -116,10 +116,10 @@ mod test {
 
             writer.append(&vec![entry(1, 1.0)])?;
 
-            fp.on("series_writer::index::append");
+            fp.on("series_writer::index::set");
             writer.append(&vec![entry(2, 2.1)]).unwrap_err();
 
-            fp.off("series_writer::index::append");
+            fp.off("series_writer::index::set");
             writer.append(&vec![entry(1, 1.1)])?;
         }
 
