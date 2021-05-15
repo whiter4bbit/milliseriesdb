@@ -72,24 +72,23 @@ impl BlockHeader {
 
 pub struct DataWriter {
     file: File,
-    offset: u64,
     buffer: Cursor<Vec<u8>>,
 }
 
 impl DataWriter {
-    pub fn create(file: File, offset: u32) -> Result<DataWriter, Error> {
-        let mut writer = DataWriter {
+    pub fn create(file: File) -> Result<DataWriter, Error> {
+        Ok(DataWriter {
             file,
-            offset: offset as u64,
             buffer: Cursor::new(Vec::with_capacity(MAX_BLOCK_SIZE as usize)),
-        };
-
-        writer.file.seek(SeekFrom::Start(offset as u64))?;
-
-        Ok(writer)
+        })
     }
 
-    pub fn append<'a, I>(&mut self, entries: I, compression: Compression) -> Result<u32, Error>
+    pub fn write_block<'a, I>(
+        &mut self,
+        offset: u32,
+        entries: I,
+        compression: Compression,
+    ) -> Result<u32, Error>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
@@ -105,7 +104,7 @@ impl DataWriter {
 
         let payload_size = self.buffer.position();
 
-        let next_offset = self.offset + payload_size + BLOCK_HEADER_SIZE;
+        let next_offset = offset as u64 + payload_size + BLOCK_HEADER_SIZE;
 
         if next_offset > MAX_DATA_FILE_SIZE as u64 {
             return Err(Error::DataFileTooBig);
@@ -117,15 +116,15 @@ impl DataWriter {
             payload_size: payload_size as u32,
         };
 
+        self.file.seek(SeekFrom::Start(offset as u64))?;
+
         block_header.write(&mut self.file)?;
 
         let block_payload = &self.buffer.get_ref()[0..payload_size as usize];
 
         self.file.write_all(block_payload)?;
 
-        self.offset = next_offset;
-
-        Ok(self.offset as u32)
+        Ok(next_offset as u32)
     }
     pub fn sync(&mut self) -> Result<(), Error> {
         self.file.sync_data()?;
@@ -209,13 +208,13 @@ impl DataReader {
 
 #[cfg(test)]
 mod test {
-    use super::super::file_system::{FileKind, OpenMode};
     use super::super::env;
+    use super::super::file_system::{FileKind, OpenMode};
     use super::*;
 
     #[test]
     fn test_read_write() -> Result<(), Error> {
-        let env = env::test::create()?;        
+        let env = env::test::create()?;
         let series_dir = env.fs().series("series1")?;
 
         let entries = vec![
@@ -228,9 +227,10 @@ mod test {
 
         {
             let file = series_dir.open(FileKind::Data, OpenMode::Write)?;
-            let mut writer = DataWriter::create(file, 0)?;
-            writer.append(&entries[0..3], Compression::Deflate)?;
-            writer.append(&entries[3..5], Compression::Deflate)?;
+            let mut writer = DataWriter::create(file)?;
+
+            let offset = writer.write_block(0, &entries[0..3], Compression::Deflate)?;
+            writer.write_block(offset, &entries[3..5], Compression::Deflate)?;
         }
 
         {
@@ -256,22 +256,20 @@ mod test {
 
     #[test]
     fn test_max_entries() -> Result<(), Error> {
-        let env = env::test::create()?;        
+        let env = env::test::create()?;
         let series_dir = env.fs().series("series1")?;
+        let no_compr = Compression::None;
 
         {
             let file = series_dir.open(FileKind::Data, OpenMode::Write)?;
-            let mut writer = DataWriter::create(file, 0)?;
+            let mut writer = DataWriter::create(file)?;
+
+            assert!(writer
+                .write_block(0, &entries(MAX_ENTRIES_PER_BLOCK), no_compr)
+                .is_ok());
 
             assert!(
-                match writer.append(&entries(MAX_ENTRIES_PER_BLOCK), Compression::None) {
-                    Ok(_) => true,
-                    _ => false,
-                }
-            );
-
-            assert!(
-                match writer.append(&entries(MAX_ENTRIES_PER_BLOCK + 1), Compression::None) {
+                match writer.write_block(0, &entries(MAX_ENTRIES_PER_BLOCK + 1), no_compr) {
                     Err(Error::TooManyEntries) => true,
                     _ => false,
                 }
@@ -283,24 +281,27 @@ mod test {
 
     #[test]
     fn test_max_data_file_size() -> Result<(), Error> {
-        let env = env::test::create()?;        
+        let env = env::test::create()?;
         let series_dir = env.fs().series("series1")?;
 
         {
             let file = series_dir.open(FileKind::Data, OpenMode::Write)?;
-            let mut writer = DataWriter::create(file, 0)?;
+            let mut writer = DataWriter::create(file)?;
 
             let entries = entries(MAX_ENTRIES_PER_BLOCK);
 
+            let mut offset = 0u32;
             for _ in 1..=10 {
-                assert!(match writer.append(&entries, Compression::None) {
-                    Ok(_) => true,
-                    Err(Error::DataFileTooBig) => true,
+                assert!(match writer.write_block(offset, &entries, Compression::None) {
+                    Ok(next) => {
+                        offset = next;
+                        true
+                    }
                     _ => false,
                 });
             }
 
-            assert!(match writer.append(&entries, Compression::None) {
+            assert!(match writer.write_block(offset, &entries, Compression::None) {
                 Err(Error::DataFileTooBig) => true,
                 _ => false,
             });

@@ -1,5 +1,7 @@
+use super::super::failpoints::failpoint;
+#[cfg(test)]
+use super::super::failpoints::Failpoints;
 use super::error::Error;
-use super::failpoints;
 use super::file_system::{FileKind, OpenMode, SeriesDir};
 use super::io_utils::{ReadBytes, WriteBytes};
 use crc::crc16;
@@ -50,10 +52,20 @@ impl Commit {
 
         Ok(commit)
     }
-    fn write<W: Write>(&self, write: &mut W) -> Result<(), Error> {
+    fn write<W: Write>(
+        &self,
+        write: &mut W,
+        #[cfg(test)] fp: Arc<Failpoints>,
+    ) -> Result<(), Error> {
         write.write_u32(&self.data_offset)?;
         write.write_u32(&self.index_offset)?;
-        failpoints::fail!("commit-log-write", io);
+
+        failpoint!(
+            fp,
+            "commit::write",
+            Err(Error::Io(io::Error::new(io::ErrorKind::WriteZero, "fp")))
+        );
+        
         write.write_i64(&self.highest_ts)?;
         write.write_u16(&self.checksum())?;
         Ok(())
@@ -74,7 +86,7 @@ mod test_commit {
 
         let mut buf = Vec::new();
 
-        commit.write(&mut buf)?;
+        commit.write(&mut buf, Arc::new(Failpoints::create()))?;
 
         assert_eq!(commit, Commit::read(&mut &buf[..])?);
 
@@ -104,10 +116,13 @@ struct Interior {
     current_size: usize,
     failure: bool,
     writer: BufWriter<File>,
+    #[cfg(test)]
+    #[allow(dead_code)]
+    fp: Arc<Failpoints>,
 }
 
 impl Interior {
-    fn open(dir: Arc<SeriesDir>) -> Result<Interior, Error> {
+    fn open(dir: Arc<SeriesDir>, #[cfg(test)] fp: Arc<Failpoints>) -> Result<Interior, Error> {
         let mut seqs: VecDeque<u64> = dir.read_log_sequences()?.into();
 
         let mut current: Option<Commit> = None;
@@ -147,6 +162,8 @@ impl Interior {
             seqs: seqs,
             failure: false,
             writer: BufWriter::new(dir.open(FileKind::Log(current_seq), OpenMode::Write)?),
+            #[cfg(test)]
+            fp: fp,
         };
 
         commit_log.commit(current)?;
@@ -201,7 +218,11 @@ impl Interior {
         self.recover_if_failed()?;
         self.rotate_if_needed()?;
 
-        match commit.write(&mut self.writer) {
+        match commit.write(
+            &mut self.writer,
+            #[cfg(test)]
+            self.fp.clone(),
+        ) {
             Err(error) => {
                 log::debug!("commit write failed: {:?} {:?}", error, &commit);
                 self.failure = true;
@@ -246,10 +267,11 @@ mod test {
     #[test]
     fn test_basic() -> Result<(), Error> {
         let fs = file_system::test::open()?;
+        let fp = Arc::new(Failpoints::create());
         let dir = fs.series("series1")?;
 
         {
-            let mut log = Interior::open(dir.clone())?;
+            let mut log = Interior::open(dir.clone(), fp.clone())?;
 
             assert_eq!(Arc::new(FIRST), log.current());
 
@@ -265,7 +287,7 @@ mod test {
         }
 
         {
-            let mut log = Interior::open(dir.clone())?;
+            let mut log = Interior::open(dir.clone(), fp.clone())?;
             assert_eq!(Arc::new(commit(4)), log.current());
             log.commit(commit(5))?;
             log.commit(commit(6))?;
@@ -280,7 +302,7 @@ mod test {
         }
 
         {
-            let log = Interior::open(dir.clone())?;
+            let log = Interior::open(dir.clone(), fp.clone())?;
             assert_eq!(Arc::new(commit(4)), log.current());
         }
 
@@ -290,10 +312,11 @@ mod test {
     #[test]
     fn test_rotate() -> Result<(), Error> {
         let fs = file_system::test::open()?;
+        let fp = Arc::new(Failpoints::create());
         let dir = fs.series("series1")?;
 
         {
-            let mut log = Interior::open(dir.clone())?;
+            let mut log = Interior::open(dir.clone(), fp.clone())?;
 
             for i in 0..19 {
                 log.commit(commit(i))?;
@@ -303,7 +326,7 @@ mod test {
         }
 
         {
-            let log = Interior::open(dir.clone())?;
+            let log = Interior::open(dir.clone(), fp.clone())?;
 
             assert_eq!(Arc::new(commit(18)), log.current());
         }
@@ -312,26 +335,26 @@ mod test {
     }
 
     #[test]
-    #[ignore]
     fn test_recover() -> Result<(), Error> {
+        let fp = Arc::new(Failpoints::create());
         let fs = file_system::test::open()?;
         let dir = fs.series("series1")?;
 
         {
-            let log = CommitLog::open(dir.clone())?;
+            let mut log = Interior::open(dir.clone(), fp.clone())?;
 
             log.commit(commit(0))?;
             log.commit(commit(1))?;
 
-            fail::cfg("commit-log-write", "return(err)")?;
+            fp.on("commit::write");
             log.commit(commit(2)).unwrap_err();
 
-            fail::remove("commit-log-write");
+            fp.off("commit::write");
             log.commit(commit(2))?;
         }
 
         {
-            let log = CommitLog::open(dir.clone())?;
+            let log = Interior::open(dir.clone(), fp.clone())?;
 
             assert_eq!(Arc::new(commit(2)), log.current());
         }
@@ -345,9 +368,13 @@ pub struct CommitLog {
 }
 
 impl CommitLog {
-    pub fn open(dir: Arc<SeriesDir>) -> Result<CommitLog, Error> {
+    pub fn open(dir: Arc<SeriesDir>, #[cfg(test)] fp: Arc<Failpoints>) -> Result<CommitLog, Error> {
         Ok(CommitLog {
-            inter: Arc::new(RwLock::new(Interior::open(dir)?)),
+            inter: Arc::new(RwLock::new(Interior::open(
+                dir,
+                #[cfg(test)]
+                fp,
+            )?)),
         })
     }
     pub fn commit(&self, commit: Commit) -> Result<(), Error> {

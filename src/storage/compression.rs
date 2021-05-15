@@ -8,7 +8,7 @@ use integer_encoding::{VarInt, VarIntWriter};
 use std::convert::TryInto;
 use std::io::{Cursor, Write};
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub enum Compression {
     None,
     Deflate,

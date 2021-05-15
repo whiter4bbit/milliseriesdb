@@ -1,3 +1,5 @@
+#[cfg(test)]
+use super::super::failpoints::Failpoints;
 use super::commit_log::CommitLog;
 use super::error::Error;
 use super::file_system::{FileKind, FileSystem, OpenMode, SeriesDir};
@@ -9,11 +11,17 @@ pub struct SeriesEnv {
     dir: Arc<SeriesDir>,
     commit_log: CommitLog,
     index: Index,
+    #[cfg(test)]
+    fp: Arc<Failpoints>,
 }
 
 impl SeriesEnv {
-    fn create(dir: Arc<SeriesDir>) -> Result<SeriesEnv, Error> {
-        let log = CommitLog::open(dir.clone())?;
+    fn create(dir: Arc<SeriesDir>, #[cfg(test)] fp: Arc<Failpoints>) -> Result<SeriesEnv, Error> {
+        let log = CommitLog::open(
+            dir.clone(),
+            #[cfg(test)]
+            fp.clone(),
+        )?;
         let index_offset = log.current().index_offset;
         Ok(SeriesEnv {
             dir: dir.clone(),
@@ -22,6 +30,8 @@ impl SeriesEnv {
                 dir.clone().open(FileKind::Index, OpenMode::Write)?,
                 index_offset,
             )?,
+            #[cfg(test)]
+            fp: fp,
         })
     }
     pub fn dir(&self) -> Arc<SeriesDir> {
@@ -29,6 +39,10 @@ impl SeriesEnv {
     }
     pub fn commit_log(&self) -> &CommitLog {
         &self.commit_log
+    }
+    #[cfg(test)]
+    pub fn fp(&self) -> Arc<Failpoints> {
+        self.fp.clone()
     }
     pub fn index(&self) -> &Index {
         &self.index
@@ -38,6 +52,8 @@ impl SeriesEnv {
 pub struct Env {
     fs: FileSystem,
     series: Arc<Mutex<HashMap<String, Arc<SeriesEnv>>>>,
+    #[cfg(test)]
+    fp: Arc<Failpoints>,
 }
 
 impl Env {
@@ -49,7 +65,11 @@ impl Env {
         match series.get(name.as_ref()) {
             Some(env) => Ok(env.clone()),
             _ => {
-                let env = Arc::new(SeriesEnv::create(self.fs.series(name.as_ref())?)?);
+                let env = Arc::new(SeriesEnv::create(
+                    self.fs.series(name.as_ref())?,
+                    #[cfg(test)]
+                    self.fp.clone(),
+                )?);
                 series.insert(name.as_ref().to_owned(), env.clone());
 
                 Ok(env.clone())
@@ -58,10 +78,16 @@ impl Env {
     }
 }
 
-pub fn create(fs: FileSystem) -> Env {
+pub fn create(
+    fs: FileSystem,
+    #[cfg(test)] 
+    fp: Arc<Failpoints>,
+) -> Env {
     Env {
         fs: fs,
         series: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(test)]
+        fp,
     }
 }
 
@@ -92,7 +118,7 @@ pub mod test {
         }
     }
 
-    pub fn create() -> Result<TempEnv, Error> {
+    pub fn create_with_failpoints(fp: Arc<Failpoints>) -> Result<TempEnv, Error> {
         let path = PathBuf::from(format!(
             "temp-dir-{:?}",
             SystemTime::now()
@@ -102,8 +128,12 @@ pub mod test {
         ));
 
         Ok(TempEnv {
-            env: super::create(file_system::open(&path)?),
+            env: super::create(file_system::open(&path)?, fp),
             path: path.clone(),
         })
+    }
+
+    pub fn create() -> Result<TempEnv, Error> {
+        create_with_failpoints(Arc::new(Failpoints::create()))
     }
 }

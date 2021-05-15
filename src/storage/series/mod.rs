@@ -10,6 +10,8 @@ mod test {
     use super::super::env;
     use super::super::error::Error;
     use super::*;
+    use std::sync::Arc;
+    use super::super::super::failpoints::Failpoints;
 
     fn entry(ts: i64, value: f64) -> Entry {
         Entry { ts, value }
@@ -72,9 +74,9 @@ mod test {
     }
 
     #[test]
-    #[ignore]
-    fn test_fail_data() -> Result<(), Error> {
-        let env = env::test::create()?;
+    fn test_recover_after_data_write_failure() -> Result<(), Error> {
+        let fp = Arc::new(Failpoints::create());
+        let env = env::test::create_with_failpoints(fp.clone())?;
         let series_env = env.series("series1")?;
 
         {
@@ -82,10 +84,10 @@ mod test {
 
             writer.append(&vec![entry(1, 1.0)])?;
 
-            fail::cfg("series-writer-data", "return(err)")?;
+            fp.on("series_writer::data_writer::write_block");
             writer.append(&vec![entry(2, 2.1)]).unwrap_err();
 
-            fail::cfg("series-writer-data", "off")?;
+            fp.off("series_writer::data_writer::write_block");
             writer.append(&vec![entry(2, 2.2)])?;
 
             writer.append(&vec![entry(3, 3.0)])?;
@@ -98,6 +100,33 @@ mod test {
                 vec![entry(1, 1.0), entry(2, 2.2), entry(3, 3.0)],
                 reader.iterator(0)?.collect::<Result<Vec<Entry>, Error>>()?
             );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_index_consistency_after_failure() -> Result<(), Error> {
+        let fp = Arc::new(Failpoints::create());
+        let env = env::test::create_with_failpoints(fp.clone())?;
+        let series_env = env.series("series1")?;
+
+        {
+            let writer = SeriesWriter::create(series_env.clone())?;
+
+            writer.append(&vec![entry(1, 1.0)])?;
+
+            fp.on("series_writer::index::append");
+            writer.append(&vec![entry(2, 2.1)]).unwrap_err();
+
+            fp.off("series_writer::index::append");
+            writer.append(&vec![entry(1, 1.1)])?;
+        }
+
+        {
+            let reader = SeriesReader::create(series_env.clone())?;
+
+            assert!(reader.iterator(2)?.collect::<Result<Vec<Entry>, Error>>()?.is_empty());
         }
 
         Ok(())

@@ -12,6 +12,7 @@ pub enum Error {
     DataFileTooBig,
     InvalidOffset,
     IndexFileTooBig,
+    IndexIsNotConsistent,
     OffsetOutsideTheRange,
     OffsetIsNotAligned,
     Other(String),

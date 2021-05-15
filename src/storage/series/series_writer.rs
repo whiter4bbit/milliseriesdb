@@ -1,9 +1,9 @@
+use super::super::super::failpoints::failpoint;
 use super::super::commit_log::Commit;
 use super::super::data::{self, DataWriter};
 use super::super::entry::Entry;
 use super::super::env::SeriesEnv;
 use super::super::error::Error;
-use super::super::failpoints;
 use super::super::file_system::{FileKind, OpenMode};
 use super::super::Compression;
 use std::sync::{Arc, Mutex};
@@ -15,13 +15,8 @@ struct SeriesWriterInterior {
 
 impl SeriesWriterInterior {
     fn create(env: Arc<SeriesEnv>) -> Result<SeriesWriterInterior, Error> {
-        let last_commit = env.commit_log().current();
-
         Ok(SeriesWriterInterior {
-            data_writer: DataWriter::create(
-                env.dir().open(FileKind::Data, OpenMode::Write)?,
-                last_commit.data_offset,
-            )?,
+            data_writer: DataWriter::create(env.dir().open(FileKind::Data, OpenMode::Write)?)?,
             env: env,
         })
     }
@@ -59,10 +54,32 @@ impl SeriesWriterInterior {
 
         let commit = self.env.commit_log().current();
 
-        let index_offset = self.env.index().append(highest_ts, commit.data_offset)?;
+        let index_offset =
+            self.env
+                .index()
+                .set(commit.index_offset, highest_ts, commit.data_offset)?;
 
-        let data_offset = self.data_writer.append(block, compression)?;
-        failpoints::fail!("series-writer-data", io);
+        failpoint!(
+            self.env.fp(),
+            "series_writer::index::append",
+            Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "fp"
+            )))
+        );
+
+        let data_offset = self
+            .data_writer
+            .write_block(commit.data_offset, block, compression)?;
+
+        failpoint!(
+            self.env.fp(),
+            "series_writer::data_writer::write_block",
+            Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "fp"
+            )))
+        );
 
         self.fsync()?;
 

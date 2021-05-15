@@ -14,35 +14,33 @@ const ENTRY_SIZE: u32 = 8 + 4;
 struct Interior {
     mmap: MmapMut,
     file: File,
-    offset: usize,
     len: usize,
 }
 
 impl Interior {
-    fn open(file: File, offset: u32) -> Result<Interior, Error> {
-        if offset % ENTRY_SIZE != 0 {
+    fn open(file: File, upper_offset: u32) -> Result<Interior, Error> {
+        if upper_offset % ENTRY_SIZE != 0 {
             return Err(Error::InvalidOffset);
         }
-        if offset > MAX_INDEX_SIZE {
+        if upper_offset > MAX_INDEX_SIZE {
             return Err(Error::IndexFileTooBig);
         }
 
-        let len = INDEX_BLOCK_SIZE.min((offset / INDEX_BLOCK_SIZE + 1) * INDEX_BLOCK_SIZE);
+        let len = INDEX_BLOCK_SIZE.min((upper_offset / INDEX_BLOCK_SIZE + 1) * INDEX_BLOCK_SIZE);
 
         file.set_len(len as u64)?;
 
         Ok(Interior {
             mmap: unsafe { MmapOptions::new().map_mut(&file)? },
             file: file,
-            offset: offset as usize,
             len: len as usize,
         })
     }
-    fn remap_if_needed(&mut self) -> Result<(), Error> {
-        if self.offset as u64 + ENTRY_SIZE as u64 > MAX_INDEX_SIZE as u64 {
+    fn remap_if_needed(&mut self, offset: u32) -> Result<(), Error> {
+        if offset as u64 + ENTRY_SIZE as u64 > MAX_INDEX_SIZE as u64 {
             return Err(Error::IndexFileTooBig);
         }
-        if self.offset + ENTRY_SIZE as usize <= self.len {
+        if offset as usize + ENTRY_SIZE as usize <= self.len {
             return Ok(());
         }
 
@@ -57,15 +55,15 @@ impl Interior {
 
         Ok(())
     }
-    fn append(&mut self, ts: i64, block_offset: u32) -> Result<u32, Error> {
-        self.remap_if_needed()?;
+    fn set(&mut self, offset: u32, ts: i64, block_offset: u32) -> Result<u32, Error> {
+        self.remap_if_needed(offset)?;
 
-        self.mmap[self.offset..self.offset + 8].copy_from_slice(&ts.to_be_bytes());
-        self.mmap[self.offset + 8..self.offset + 12].copy_from_slice(&block_offset.to_be_bytes());
+        let offset = offset as usize;
 
-        self.offset += ENTRY_SIZE as usize;
+        self.mmap[offset..offset + 8].copy_from_slice(&ts.to_be_bytes());
+        self.mmap[offset + 8..offset + 12].copy_from_slice(&block_offset.to_be_bytes());
 
-        Ok(self.offset as u32)
+        Ok(offset as u32 + ENTRY_SIZE)
     }
     fn sync(&mut self) -> Result<(), Error> {
         Ok(self.mmap.flush()?)
@@ -88,13 +86,32 @@ impl Interior {
             (&self.mmap[start..start + 4]).try_into()?,
         )))
     }
+}
+
+#[cfg(test)]
+impl Interior {
+    fn check_consistency(&self, upper_offset: u32) -> Result<(), Error> {
+        let entries = (upper_offset / ENTRY_SIZE) as usize;
+        for i in 1..entries {
+            if self.nth_ts(i - 1)? > self.nth_ts(i)? {
+                return Err(Error::IndexIsNotConsistent)
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Interior {
     fn ceiling_offset(&self, ts: i64, upper_offset: u32) -> Result<Option<u32>, Error> {
-        if upper_offset as usize > self.offset {
+        if upper_offset as usize > self.len {
             return Err(Error::OffsetOutsideTheRange);
         }
         if (upper_offset as u32) % ENTRY_SIZE != 0 {
             return Err(Error::OffsetIsNotAligned);
         }
+
+        #[cfg(test)]
+        self.check_consistency(upper_offset)?;
 
         let entries = upper_offset / ENTRY_SIZE;
 
@@ -129,11 +146,11 @@ mod test_index {
         let dir = fs.series("series1")?;
         {
             let mut index = Interior::open(dir.open(FileKind::Index, OpenMode::Write)?, 0)?;
-            index.append(-10, 0)?;
-            index.append(-2, 1)?;
-            index.append(-1, 4)?;
-            index.append(4, 5)?;
-            let upper = index.append(6, 7)?;
+            assert_eq!(1 * ENTRY_SIZE, index.set(0 * ENTRY_SIZE, -10, 0)?);
+            assert_eq!(2 * ENTRY_SIZE, index.set(1 * ENTRY_SIZE,-2, 1)?);
+            assert_eq!(3 * ENTRY_SIZE, index.set(2 * ENTRY_SIZE,-1, 4)?);
+            assert_eq!(4 * ENTRY_SIZE, index.set(3 * ENTRY_SIZE,4, 5)?);
+            let upper = index.set(4 * ENTRY_SIZE, 6, 7)?;
 
             assert_eq!(Some(0), index.ceiling_offset(-10, upper)?);
             assert_eq!(Some(4), index.ceiling_offset(-1, upper)?);
@@ -158,9 +175,9 @@ impl Index {
             inter: Arc::new(RwLock::new(Interior::open(file, offset)?)),
         })
     }
-    pub fn append(&self, ts: i64, offset: u32) -> Result<u32, Error> {
+    pub fn set(&self, offset: u32, ts: i64, block_offset: u32) -> Result<u32, Error> {
         let mut inter = self.inter.write().unwrap();
-        inter.append(ts, offset)
+        inter.set(offset, ts, block_offset)
     }
     pub fn sync(&self) -> Result<(), Error> {
         let mut inter = self.inter.write().unwrap();
