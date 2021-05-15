@@ -25,9 +25,3 @@ crc = "1.8.1"
 strength_reduce = "0.2.3"
 futures = "0.3.14"
 memmap = "0.7.0"
-fail = "0.4"
-
-[[test]]
-name = "commit_log_failpoints"
-path = "src/storage/commit_log_failpoints.rs"
-required-features = ["fail/failpoints"]
