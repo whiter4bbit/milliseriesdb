@@ -183,7 +183,7 @@ mod restapi {
 
                 entries_count += batch.len();
 
-                writer.append_async(batch).await?;
+                writer.append_with_batch_size_async(10, batch).await?;
 
                 log::debug!("Imported {} entries", entries_count);
             }

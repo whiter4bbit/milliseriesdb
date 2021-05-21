@@ -103,14 +103,7 @@ where
         Ok(())
     }
 
-    pub fn append<'a, E>(&mut self, batch: E) -> Result<(), Error>
-    where
-        E: IntoIterator<Item = &'a Entry> + 'a,
-    {
-        self.append_opt(batch, Compression::Delta)
-    }
-
-    pub fn append_opt<'a, E>(&mut self, entries: E, compression: Compression) -> Result<(), Error>
+    pub fn append<'a, E>(&mut self, entries: E) -> Result<(), Error>
     where
         E: IntoIterator<Item = &'a Entry> + 'a,
     {
@@ -122,7 +115,7 @@ where
                 return Ok(());
             }
 
-            self.append_block(block, compression.clone())?;
+            self.append_block(block, Compression::Delta)?;
         }
     }
 }
@@ -161,15 +154,6 @@ impl SeriesWriter {
         appender.done()
     }
 
-    pub fn append_opt<'a, I>(&self, batch: I, compression: Compression) -> Result<(), Error>
-    where
-        I: IntoIterator<Item = &'a Entry> + 'a,
-    {
-        let mut appender = self.appender()?;
-        appender.append_opt(batch, compression)?;
-        appender.done()
-    }
-
     pub async fn append_async(&self, batch: Vec<Entry>) -> Result<(), Error> {
         let writer = self.writer.clone();
         tokio::task::spawn_blocking(move || {
@@ -181,15 +165,21 @@ impl SeriesWriter {
         .unwrap()
     }
 
-    pub async fn append_opt_async(
-        &self,
-        batch: Vec<Entry>,
-        compression: Compression,
-    ) -> Result<(), Error> {
+    pub async fn append_with_batch_size_async(&self, size: usize, entries: Vec<Entry>) -> Result<(), Error> {
         let writer = self.writer.clone();
         tokio::task::spawn_blocking(move || {
             let mut appender = Appender::create(writer.lock().unwrap())?;
-            appender.append_opt(&batch, compression)?;
+
+            let iter = &mut entries.iter();
+            loop {
+                let batch: Vec<&Entry> = iter.take(size).collect();
+                
+                if batch.is_empty() {
+                    break
+                }
+                
+                appender.append(batch)?;
+            }
             appender.done()
         })
         .await

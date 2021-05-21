@@ -25,7 +25,7 @@ pub fn append(
     series_id: &str,
     input_csv: &str,
     batch_size: usize,
-    compression: Compression,
+    _compression: Compression,
 ) -> io::Result<()> {
     let reader: Box<dyn BufRead> = if input_csv.ends_with(".gz") {
         Box::new(BufReader::new(GzDecoder::new(File::open(input_csv)?)?))
@@ -40,12 +40,12 @@ pub fn append(
         let CsvEntry(ts, val) = entry?.parse::<CsvEntry>()?;
         buffer.push(Entry { ts, value: val });
         if buffer.len() == batch_size {
-            writer.append_opt(&buffer, compression.clone())?;
+            writer.append(&buffer)?;
             buffer.clear();
         }
     }
     if !buffer.is_empty() {
-        writer.append_opt(&buffer, compression)?;
+        writer.append(&buffer)?;
     }
     Ok(())
 }
