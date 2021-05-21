@@ -6,6 +6,7 @@ use super::super::env::SeriesEnv;
 use super::super::error::Error;
 use super::super::file_system::{FileKind, OpenMode};
 use super::super::Compression;
+use crate::buffering::BufferingBuilder;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -107,16 +108,15 @@ where
     where
         E: IntoIterator<Item = &'a Entry> + 'a,
     {
-        let iter = &mut self.process_entries(entries).into_iter();
-        loop {
-            let block: Vec<&'a Entry> = iter.take(data::MAX_ENTRIES_PER_BLOCK).collect();
-
-            if block.is_empty() {
-                return Ok(());
-            }
-
+        for block in self
+            .process_entries(entries)
+            .into_iter()
+            .buffering::<Vec<&'a Entry>>(data::MAX_ENTRIES_PER_BLOCK)
+        {
             self.append_block(block, Compression::Delta)?;
         }
+
+        Ok(())
     }
 }
 
@@ -165,20 +165,17 @@ impl SeriesWriter {
         .unwrap()
     }
 
-    pub async fn append_with_batch_size_async(&self, size: usize, entries: Vec<Entry>) -> Result<(), Error> {
+    pub async fn append_with_batch_size_async(
+        &self,
+        size: usize,
+        entries: Vec<Entry>,
+    ) -> Result<(), Error> {
         let writer = self.writer.clone();
         tokio::task::spawn_blocking(move || {
             let mut appender = Appender::create(writer.lock().unwrap())?;
 
-            let iter = &mut entries.iter();
-            loop {
-                let batch: Vec<&Entry> = iter.take(size).collect();
-                
-                if batch.is_empty() {
-                    break
-                }
-                
-                appender.append(batch)?;
+            for batch in entries.into_iter().buffering::<Vec<Entry>>(size) {
+                appender.append(&batch)?;
             }
             appender.done()
         })

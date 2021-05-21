@@ -2,14 +2,15 @@ use bytes::buf::Buf;
 use chrono::{TimeZone, Utc};
 use futures::{Stream, StreamExt};
 use hyper::body::{Body, Bytes, Sender};
+use milliseriesdb::buffering::BufferingBuilder;
 use milliseriesdb::csv;
 use milliseriesdb::query::{Aggregation, QueryBuilder, Row, Statement, StatementExpr};
 use milliseriesdb::storage::{error::Error, Entry, SeriesReader, SeriesTable, SeriesWriter};
 use serde_derive::{Deserialize, Serialize};
 use std::convert::{Infallible, TryFrom};
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::io;
 use warp::{http::Response, http::StatusCode, Filter};
 
 mod restapi {
@@ -95,21 +96,16 @@ mod restapi {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<Entry>>(1);
 
         tokio::task::spawn_blocking(move || {
-            let iter = &mut reader.iterator(0)?;
-
-            loop {
-                let buf = iter.take(1024).collect::<Result<Vec<Entry>, Error>>()?;
-
-                if buf.is_empty() {
-                    break;
-                } else {
-                    tx.blocking_send(buf).map_err(|e| {
-                        io::Error::new(
-                            io::ErrorKind::Other,
-                            format!("can not send the data from the reading thread {:?}", e),
-                        )
-                    })?;
-                }
+            for batch in reader
+                .iterator(0)?
+                .buffering::<Result<Vec<Entry>, Error>>(1024)
+            {
+                tx.blocking_send(batch?).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("can not send the data from the reading thread {:?}", e),
+                    )
+                })?;
             }
 
             Ok::<(), io::Error>(())
@@ -169,17 +165,12 @@ mod restapi {
         let mut body = body.boxed();
         let mut entries_count = 0usize;
         while let Some(Ok(mut chunk)) = body.next().await {
-            let entries = &mut csv.read(&mut chunk);
-
-            loop {
-                let batch = entries
-                    .take(1024 * 1024)
-                    .collect::<Result<Vec<Entry>, ()>>()
+            for batch in csv
+                .read(&mut chunk)
+                .buffering::<Result<Vec<Entry>, ()>>(1024 * 1024)
+            {
+                let batch = batch
                     .map_err(|_| io::Error::new(io::ErrorKind::Other, "Can not read entries"))?;
-
-                if batch.is_empty() {
-                    break;
-                }
 
                 entries_count += batch.len();
 
