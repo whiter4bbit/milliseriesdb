@@ -8,7 +8,7 @@ use integer_encoding::{VarInt, VarIntWriter};
 use std::convert::TryInto;
 use std::io::{Cursor, Write};
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub enum Compression {
     None,
     Deflate,
@@ -19,7 +19,7 @@ fn write_delta<W: Write>(block: &[&Entry], to: &mut W) -> Result<(), Error> {
     let mut last_ts = block[0].ts;
     let mut last_val = block[0].value;
 
-    to.write_u64(&last_ts)?;
+    to.write_i64(&last_ts)?;
     to.write_f64(&last_val)?;
 
     for entry in &block[1..] {
@@ -34,7 +34,7 @@ fn write_delta<W: Write>(block: &[&Entry], to: &mut W) -> Result<(), Error> {
 
 fn write_raw<W: Write>(block: &[&Entry], to: &mut W) -> Result<(), Error> {
     for entry in block {
-        to.write_u64(&entry.ts)?;
+        to.write_i64(&entry.ts)?;
         to.write_f64(&entry.value)?;
     }
     Ok(())
@@ -52,7 +52,7 @@ fn read_raw(from: &[u8], size: usize) -> Result<Vec<Entry>, Error> {
     let mut entries = Vec::new();
     for _ in 0..size {
         entries.push(Entry {
-            ts: cursor.read_u64()?,
+            ts: cursor.read_i64()?,
             value: cursor.read_f64()?,
         });
     }
@@ -64,7 +64,7 @@ fn read_deflate(from: &[u8], size: usize) -> Result<Vec<Entry>, Error> {
     let mut entries = Vec::new();
     for _ in 0..size {
         entries.push(Entry {
-            ts: decoder.read_u64()?,
+            ts: decoder.read_i64()?,
             value: decoder.read_f64()?,
         });
     }
@@ -76,7 +76,7 @@ fn read_delta(from: &[u8], size: usize) -> Result<Vec<Entry>, Error> {
 
     let mut offset = 0usize;
 
-    let mut last_ts = u64::from_be_bytes(from[..8].try_into()?);
+    let mut last_ts = i64::from_be_bytes(from[..8].try_into()?);
     offset += 8;
 
     let mut last_val = f64::from_be_bytes(from[offset..offset + 8].try_into()?);
@@ -88,7 +88,7 @@ fn read_delta(from: &[u8], size: usize) -> Result<Vec<Entry>, Error> {
     });
 
     for _ in 1..size {
-        let (cur_ts, shift) = u64::decode_var(&from[offset..]).ok_or(Error::VarIntError)?;
+        let (cur_ts, shift) = i64::decode_var(&from[offset..]).ok_or(Error::VarIntError)?;
         offset += shift;
 
         let (cur_val_mask, shift) =

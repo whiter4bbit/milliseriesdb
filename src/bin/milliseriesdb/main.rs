@@ -1,6 +1,6 @@
 use clap::clap_app;
 use milliseriesdb::query::StatementExpr;
-use milliseriesdb::storage::{file_system, series_table, Compression, SyncMode};
+use milliseriesdb::storage::{file_system, env, series_table, Compression};
 use std::sync::Arc;
 
 mod append;
@@ -49,7 +49,8 @@ async fn main() {
 
     let fs = file_system::open(matches.value_of("path").unwrap()).unwrap();
 
-    let series_table = series_table::create(fs, SyncMode::Every(100)).unwrap();
+    let env = env::create(fs);
+    let series_table = series_table::create(env).unwrap();
 
     match matches.subcommand() {
         ("append", Some(sub_match)) => append::append(
@@ -85,7 +86,7 @@ async fn main() {
                 sub_match.value_of("csv").unwrap(),
                 sub_match
                     .value_of("from")
-                    .and_then(|from| from.parse::<u64>().ok())
+                    .and_then(|from| from.parse::<i64>().ok())
                     .unwrap(),
             )
             .unwrap();

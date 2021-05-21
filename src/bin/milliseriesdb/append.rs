@@ -4,14 +4,14 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::str::FromStr;
 
-struct CsvEntry(u64, f64);
+struct CsvEntry(i64, f64);
 
 impl FromStr for CsvEntry {
     type Err = io::Error;
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let mut parts = input.split(';').map(|p| p.trim());
         match (
-            parts.next().and_then(|ts| ts.parse::<u64>().ok()),
+            parts.next().and_then(|ts| ts.parse::<i64>().ok()),
             parts.next().and_then(|val| val.parse::<f64>().ok()),
         ) {
             (Some(ts), Some(val)) => Ok(CsvEntry(ts, val)),

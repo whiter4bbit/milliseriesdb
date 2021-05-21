@@ -62,10 +62,30 @@ impl State {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum Aggregation {
     Mean(f64), Min(f64), Max(f64),
 }
+
+#[cfg(test)]
+impl PartialEq<Aggregation> for Aggregation {
+    fn eq(&self, other: &Aggregation) -> bool {
+        match self {
+            Aggregation::Mean(lhs) => match other {
+                Aggregation::Mean(rhs) => (lhs - rhs).abs() <= 10e-6,
+                _ => false
+            },
+            Aggregation::Min(lhs) => match other {
+                Aggregation::Min(rhs) => (lhs - rhs).abs() <= 10e-6,
+                _ => false
+            },
+            Aggregation::Max(lhs) => match other {
+                Aggregation::Max(rhs) => (lhs - rhs).abs() <= 10e-6,
+                _ => false
+            }
+        }
+    }
+} 
 
 pub struct AggregatorsFolder {
     states: Vec<State>,

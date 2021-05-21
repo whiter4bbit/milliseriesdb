@@ -4,19 +4,18 @@ use crate::storage::error::Error;
 use serde_derive::{Deserialize, Serialize};
 use super::statement::Statement;
 use std::time::SystemTime;
-use strength_reduce::StrengthReducedU64;
 use super::group_by::GroupBy;
 use std::convert::From;
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Row {
-    pub ts: u64,
+    pub ts: i64,
     pub values: Vec<Aggregation>,
 }
 
-impl From<(u64, Vec<Aggregation>)> for Row {
-    fn from(row: (u64, Vec<Aggregation>)) -> Row {
+impl From<(i64, Vec<Aggregation>)> for Row {
+    fn from(row: (i64, Vec<Aggregation>)) -> Row {
         Row {
             ts: row.0,
             values: row.1,
@@ -58,7 +57,7 @@ where
             folder: folder,
             current: None,
             iterations: 0,
-            granularity: StrengthReducedU64::new(self.statement.group_by),
+            granularity: self.statement.group_by,
         };
 
         let start_ts = SystemTime::now();

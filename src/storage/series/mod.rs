@@ -2,23 +2,25 @@ mod series_reader;
 mod series_writer;
 
 pub use series_reader::{SeriesIterator, SeriesReader};
-pub use series_writer::{SeriesWriter, SyncMode};
+pub use series_writer::SeriesWriter;
 
 #[cfg(test)]
 mod test {
     use super::super::entry::Entry;
+    use super::super::env;
     use super::super::error::Error;
-    use super::super::file_system;
     use super::*;
+    use std::sync::Arc;
+    use super::super::super::failpoints::Failpoints;
 
-    fn entry(ts: u64, value: f64) -> Entry {
+    fn entry(ts: i64, value: f64) -> Entry {
         Entry { ts, value }
     }
 
     #[test]
     fn test_series_read_write() -> Result<(), Error> {
-        let file_system = &file_system::open_temp()?;
-        let series_dir = file_system.series("series1")?;
+        let env = env::test::create()?;
+        let series_env = env.series("series1")?;
 
         let entries = [
             entry(1, 11.0),
@@ -36,13 +38,13 @@ mod test {
             entry(140, 1140.0),
         ];
         {
-            let writer = SeriesWriter::create(series_dir.clone())?;
+            let writer = SeriesWriter::create(series_env.clone())?;
             writer.append(&entries[0..5])?;
             writer.append(&entries[5..8])?;
             writer.append(&entries[8..11])?;
         }
 
-        let reader = SeriesReader::create(series_dir.clone())?;
+        let reader = SeriesReader::create(series_env.clone())?;
         assert_eq!(
             entries[3..11].to_vec(),
             reader.iterator(4)?.collect::<Result<Vec<Entry>, Error>>()?
@@ -59,7 +61,7 @@ mod test {
         );
 
         {
-            let writer = SeriesWriter::create(series_dir)?;
+            let writer = SeriesWriter::create(series_env.clone())?;
             writer.append(&entries[11..13])?;
         }
 
@@ -67,6 +69,65 @@ mod test {
             entries[1..13].to_vec(),
             reader.iterator(2)?.collect::<Result<Vec<Entry>, Error>>()?
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_recover_after_data_write_failure() -> Result<(), Error> {
+        let fp = Arc::new(Failpoints::create());
+        let env = env::test::create_with_failpoints(fp.clone())?;
+        let series_env = env.series("series1")?;
+
+        {
+            let writer = SeriesWriter::create(series_env.clone())?;
+
+            writer.append(&vec![entry(1, 1.0)])?;
+
+            fp.on("series_writer::data_writer::write_block");
+            writer.append(&vec![entry(2, 2.1)]).unwrap_err();
+
+            fp.off("series_writer::data_writer::write_block");
+            writer.append(&vec![entry(2, 2.2)])?;
+
+            writer.append(&vec![entry(3, 3.0)])?;
+        }
+
+        {
+            let reader = SeriesReader::create(series_env.clone())?;
+
+            assert_eq!(
+                vec![entry(1, 1.0), entry(2, 2.2), entry(3, 3.0)],
+                reader.iterator(0)?.collect::<Result<Vec<Entry>, Error>>()?
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_index_consistency_after_failure() -> Result<(), Error> {
+        let fp = Arc::new(Failpoints::create());
+        let env = env::test::create_with_failpoints(fp.clone())?;
+        let series_env = env.series("series1")?;
+
+        {
+            let writer = SeriesWriter::create(series_env.clone())?;
+
+            writer.append(&vec![entry(1, 1.0)])?;
+
+            fp.on("series_writer::index::set");
+            writer.append(&vec![entry(2, 2.1)]).unwrap_err();
+
+            fp.off("series_writer::index::set");
+            writer.append(&vec![entry(1, 1.1)])?;
+        }
+
+        {
+            let reader = SeriesReader::create(series_env.clone())?;
+
+            assert!(reader.iterator(2)?.collect::<Result<Vec<Entry>, Error>>()?.is_empty());
+        }
 
         Ok(())
     }

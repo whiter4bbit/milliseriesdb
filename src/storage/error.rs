@@ -2,12 +2,26 @@ use std::{error, array, io, fmt};
 
 #[derive(Debug)]
 pub enum Error {
-    Crc32Mismatch,
+    Crc16Mismatch,
     UnknownCompression,
     Io(io::Error),
     Slice(array::TryFromSliceError),
     VarIntError,
     ArgTooSmall,
+    TooManyEntries,
+    DataFileTooBig,
+    InvalidOffset,
+    IndexFileTooBig,
+    IndexIsNotConsistent,
+    OffsetOutsideTheRange,
+    OffsetIsNotAligned,
+    Other(String),
+}
+
+impl From<String> for Error {
+    fn from(err: String) -> Error {
+        Error::Other(err)
+    }
 }
 
 impl From<io::Error> for Error {

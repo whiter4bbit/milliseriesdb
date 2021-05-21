@@ -6,7 +6,7 @@ pub fn export(
     series_table: SeriesTable,
     series_id: &str,
     output_csv: &str,
-    from_ts: u64,
+    from_ts: i64,
 ) -> io::Result<()> {
     let reader = series_table.reader(series_id).unwrap();
     let mut writer = BufWriter::new(File::create(output_csv)?);

@@ -1,47 +1,36 @@
-use std::collections::VecDeque;
-use std::sync::Arc;
 use super::super::data::DataReader;
 use super::super::entry::Entry;
-use super::super::file_system::{FileKind, OpenMode, SeriesDir};
-use super::super::index::IndexReader;
-use super::super::log::LogReader;
+use super::super::env::SeriesEnv;
 use super::super::error::Error;
+use super::super::file_system::{FileKind, OpenMode};
+use std::collections::VecDeque;
+use std::sync::Arc;
 
 pub struct SeriesReader {
-    dir: Arc<SeriesDir>,
-    log_reader: LogReader,
+    env: Arc<SeriesEnv>,
 }
 
 impl SeriesReader {
-    #[allow(dead_code)]
-    pub fn create(dir: Arc<SeriesDir>) -> Result<SeriesReader, Error> {
-        Ok(SeriesReader {
-            dir: dir.clone(),
-            log_reader: LogReader::create(dir),
-        })
+    pub fn create(env: Arc<SeriesEnv>) -> Result<SeriesReader, Error> {
+        Ok(SeriesReader { env: env.clone() })
     }
 
-    #[allow(dead_code)]
-    pub fn iterator(&self, from_ts: u64) -> Result<SeriesIterator, Error> {
-        let last_log_entry = self.log_reader.get_last_entry_or_default()?;
+    pub fn iterator(&self, from_ts: i64) -> Result<SeriesIterator, Error> {
+        let commit = self.env.commit_log().current();
 
-        let mut index_reader = IndexReader::create(
-            self.dir.open(FileKind::Index, OpenMode::Read)?,
-            last_log_entry.index_offset,
-        )?;
-
-        let start_offset = match index_reader.ceiling_offset(from_ts)? {
-            Some(offset) => offset,
-            _ => last_log_entry.data_offset,
-        };
+        let start_offset = self
+            .env
+            .index()
+            .ceiling_offset(from_ts, commit.index_offset)?
+            .unwrap_or(0);
 
         Ok(SeriesIterator {
             data_reader: DataReader::create(
-                self.dir.open(FileKind::Data, OpenMode::Read)?,
+                self.env.dir().open(FileKind::Data, OpenMode::Read)?,
                 start_offset,
             )?,
             offset: start_offset,
-            size: last_log_entry.data_offset,
+            size: commit.data_offset,
             from_ts,
             buffer: VecDeque::new(),
         })
@@ -50,9 +39,9 @@ impl SeriesReader {
 
 pub struct SeriesIterator {
     data_reader: DataReader,
-    offset: u64,
-    size: u64,
-    from_ts: u64,
+    offset: u32,
+    size: u32,
+    from_ts: i64,
     buffer: VecDeque<Entry>,
 }
 
