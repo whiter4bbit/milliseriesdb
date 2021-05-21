@@ -24,7 +24,34 @@ where
     F: Folder,
 {
     fn key(&self, entry: &Entry) -> i64 {
-        entry.ts - (entry.ts.rem_euclid(self.granularity as i64))
+        entry.ts - (entry.ts % (self.granularity as i64))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    fn key(ts: i64, gran: u32) -> i64 {
+        ts - (ts % (gran as i64))
+    }
+
+    fn keyi64(ts: i64, gran: i64) -> i64 {
+        let a = ts;
+        let b = ts % (gran);
+        println!("a = {}, b = {}", a, b);
+        a - b
+    }
+
+    #[test]
+    fn test_group_key() {
+        let a = -123i64;
+        let b = 100i64;
+
+        assert_eq!(-23i64, -123i64 % 100i64);
+        assert_eq!(-23i64, a % b);
+
+        assert_eq!(-100i64, -123i64 - (-23i64));
+        assert_eq!(-100i64, keyi64(-123i64, 100i64));
+        assert_eq!(-100i64, key(-123i64, 100));
     }
 }
 

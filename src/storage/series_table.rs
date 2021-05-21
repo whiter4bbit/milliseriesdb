@@ -1,5 +1,5 @@
-use super::error::Error;
 use super::env::Env;
+use super::error::Error;
 use super::{SeriesReader, SeriesWriter};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -11,10 +11,7 @@ struct TableEntry {
 }
 
 impl TableEntry {
-    pub fn open_or_create<S: AsRef<str>>(
-        env: &Env,
-        name: S
-    ) -> Result<TableEntry, Error> {
+    pub fn open_or_create<S: AsRef<str>>(env: &Env, name: S) -> Result<TableEntry, Error> {
         Ok(TableEntry {
             writer: Arc::new(SeriesWriter::create(env.series(name.as_ref())?)?),
             reader: Arc::new(SeriesReader::create(env.series(name.as_ref())?)?),
@@ -90,4 +87,51 @@ pub fn create(env: Env) -> Result<SeriesTable, Error> {
         env,
         entries: Arc::new(Mutex::new(entries)),
     })
+}
+
+#[cfg(test)]
+pub mod test {
+    use super::super::super::failpoints::Failpoints;
+    use super::super::{env, file_system};
+    use super::*;
+    use std::fs;
+    use std::ops::Deref;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    pub struct TempSeriesTable {
+        pub series_table: SeriesTable,
+        path: PathBuf,
+    }
+
+    impl Drop for TempSeriesTable {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.path).unwrap();
+        }
+    }
+
+    impl Deref for TempSeriesTable {
+        type Target = SeriesTable;
+        fn deref(&self) -> &Self::Target {
+            &self.series_table
+        }
+    }
+
+    pub fn create() -> Result<TempSeriesTable, Error> {
+        let path = PathBuf::from(format!(
+            "temp-dir-{:?}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        Ok(TempSeriesTable {
+            series_table: super::create(env::create(
+                file_system::open(path.clone())?,
+                Arc::new(Failpoints::create()),
+            ))?,
+            path: path.clone(),
+        })
+    }
 }

@@ -26,7 +26,7 @@ impl Interior {
             return Err(Error::IndexFileTooBig);
         }
 
-        let len = INDEX_BLOCK_SIZE.min((upper_offset / INDEX_BLOCK_SIZE + 1) * INDEX_BLOCK_SIZE);
+        let len = MAX_INDEX_SIZE.min((upper_offset / INDEX_BLOCK_SIZE + 1) * INDEX_BLOCK_SIZE);
 
         file.set_len(len as u64)?;
 
@@ -49,8 +49,6 @@ impl Interior {
         self.file.set_len(len as u64)?;
         self.mmap = unsafe { MmapOptions::new().map_mut(&self.file)? };
 
-        log::debug!("index {:?} remapped {} -> {}", &self.file, self.len, len,);
-
         self.len = len;
 
         Ok(())
@@ -59,6 +57,8 @@ impl Interior {
         self.remap_if_needed(offset)?;
 
         let offset = offset as usize;
+
+        debug_assert!(offset + ENTRY_SIZE as usize <= self.len);
 
         self.mmap[offset..offset + 8].copy_from_slice(&ts.to_be_bytes());
         self.mmap[offset + 8..offset + 12].copy_from_slice(&block_offset.to_be_bytes());

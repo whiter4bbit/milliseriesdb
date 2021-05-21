@@ -6,37 +6,57 @@ use super::super::env::SeriesEnv;
 use super::super::error::Error;
 use super::super::file_system::{FileKind, OpenMode};
 use super::super::Compression;
-use std::sync::{Arc, Mutex};
+use std::ops::DerefMut;
+use std::sync::{Arc, Mutex, MutexGuard};
 
-struct Interior {
+pub struct Interior {
     data_writer: DataWriter,
     env: Arc<SeriesEnv>,
 }
 
-impl Interior {
-    fn create(env: Arc<SeriesEnv>) -> Result<Interior, Error> {
-        Ok(Interior {
-            data_writer: DataWriter::create(env.dir().open(FileKind::Data, OpenMode::Write)?)?,
-            env: env,
+pub struct Appender<I>
+where
+    I: DerefMut<Target = Interior>,
+{
+    inter: I,
+    data_offset: u32,
+    index_offset: u32,
+    highest_ts: i64,
+}
+
+impl<I> Appender<I>
+where
+    I: DerefMut<Target = Interior>,
+{
+    fn create(inter: I) -> Result<Appender<I>, Error> {
+        let commit = inter.env.commit_log().current();
+
+        Ok(Appender {
+            inter: inter,
+            data_offset: commit.data_offset,
+            index_offset: commit.index_offset,
+            highest_ts: commit.highest_ts,
         })
     }
 
-    fn fsync(&mut self) -> Result<(), Error> {
-        self.data_writer.sync()?;
-        self.env.index().sync()?;
+    pub fn done(mut self) -> Result<(), Error> {
+        self.inter.data_writer.sync()?;
+        self.inter.env.index().sync()?;
 
-        Ok(())
+        self.inter.env.commit_log().commit(Commit {
+            data_offset: self.data_offset,
+            index_offset: self.index_offset,
+            highest_ts: self.highest_ts,
+        })
     }
 
-    fn process_entries<'a, I>(&mut self, entries: I) -> Vec<&'a Entry>
+    fn process_entries<'a, E>(&mut self, entries: E) -> Vec<&'a Entry>
     where
-        I: IntoIterator<Item = &'a Entry> + 'a,
+        E: IntoIterator<Item = &'a Entry> + 'a,
     {
-        let highest_ts = self.env.commit_log().current().highest_ts;
-
         let mut entries: Vec<&Entry> = entries
             .into_iter()
-            .filter(|entry| entry.ts >= highest_ts)
+            .filter(|entry| entry.ts >= self.highest_ts)
             .collect();
         entries.sort_by_key(|entry| entry.ts);
         entries
@@ -52,15 +72,11 @@ impl Interior {
             _ => return Ok(()),
         };
 
-        let commit = self.env.commit_log().current();
-
-        let index_offset =
-            self.env
-                .index()
-                .set(commit.index_offset, highest_ts, commit.data_offset)?;
+        #[rustfmt::skip]
+        let index_offset = self.inter.env.index().set(self.index_offset, highest_ts, self.data_offset)?;
 
         failpoint!(
-            self.env.fp(),
+            self.inter.env.fp(),
             "series_writer::index::set",
             Err(Error::Io(std::io::Error::new(
                 std::io::ErrorKind::WriteZero,
@@ -68,12 +84,11 @@ impl Interior {
             )))
         );
 
-        let data_offset = self
-            .data_writer
-            .write_block(commit.data_offset, block, compression)?;
+        #[rustfmt::skip]
+        let data_offset = self.inter.data_writer.write_block(self.data_offset, block, compression)?;
 
         failpoint!(
-            self.env.fp(),
+            self.inter.env.fp(),
             "series_writer::data_writer::write_block",
             Err(Error::Io(std::io::Error::new(
                 std::io::ErrorKind::WriteZero,
@@ -81,25 +96,23 @@ impl Interior {
             )))
         );
 
-        self.fsync()?;
+        self.data_offset = data_offset;
+        self.index_offset = index_offset;
+        self.highest_ts = highest_ts;
 
-        self.env.commit_log().commit(Commit {
-            data_offset,
-            index_offset,
-            highest_ts,
-        })
+        Ok(())
     }
 
-    fn append<'a, I>(&mut self, batch: I) -> Result<(), Error>
+    pub fn append<'a, E>(&mut self, batch: E) -> Result<(), Error>
     where
-        I: IntoIterator<Item = &'a Entry> + 'a,
+        E: IntoIterator<Item = &'a Entry> + 'a,
     {
         self.append_opt(batch, Compression::Delta)
     }
 
-    fn append_opt<'a, I>(&mut self, entries: I, compression: Compression) -> Result<(), Error>
+    pub fn append_opt<'a, E>(&mut self, entries: E, compression: Compression) -> Result<(), Error>
     where
-        I: IntoIterator<Item = &'a Entry> + 'a,
+        E: IntoIterator<Item = &'a Entry> + 'a,
     {
         let iter = &mut self.process_entries(entries).into_iter();
         loop {
@@ -111,6 +124,15 @@ impl Interior {
 
             self.append_block(block, compression.clone())?;
         }
+    }
+}
+
+impl Interior {
+    fn create(env: Arc<SeriesEnv>) -> Result<Interior, Error> {
+        Ok(Interior {
+            data_writer: DataWriter::create(env.dir().open(FileKind::Data, OpenMode::Write)?)?,
+            env: env,
+        })
     }
 }
 
@@ -126,27 +148,34 @@ impl SeriesWriter {
         })
     }
 
+    pub fn appender(&self) -> Result<Appender<MutexGuard<'_, Interior>>, Error> {
+        Appender::create(self.writer.lock().unwrap())
+    }
+
     pub fn append<'a, I>(&self, batch: I) -> Result<(), Error>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
-        let mut writer = self.writer.lock().unwrap();
-        writer.append(batch)
+        let mut appender = self.appender()?;
+        appender.append(batch)?;
+        appender.done()
     }
 
     pub fn append_opt<'a, I>(&self, batch: I, compression: Compression) -> Result<(), Error>
     where
         I: IntoIterator<Item = &'a Entry> + 'a,
     {
-        let mut writer = self.writer.lock().unwrap();
-        writer.append_opt(batch, compression)
+        let mut appender = self.appender()?;
+        appender.append_opt(batch, compression)?;
+        appender.done()
     }
 
     pub async fn append_async(&self, batch: Vec<Entry>) -> Result<(), Error> {
         let writer = self.writer.clone();
         tokio::task::spawn_blocking(move || {
-            let mut writer = writer.lock().unwrap();
-            writer.append(&batch)
+            let mut appender = Appender::create(writer.lock().unwrap())?;
+            appender.append(&batch)?;
+            appender.done()
         })
         .await
         .unwrap()
@@ -159,8 +188,9 @@ impl SeriesWriter {
     ) -> Result<(), Error> {
         let writer = self.writer.clone();
         tokio::task::spawn_blocking(move || {
-            let mut writer = writer.lock().unwrap();
-            writer.append_opt(&batch, compression)
+            let mut appender = Appender::create(writer.lock().unwrap())?;
+            appender.append_opt(&batch, compression)?;
+            appender.done()
         })
         .await
         .unwrap()
