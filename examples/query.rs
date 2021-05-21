@@ -28,6 +28,7 @@ fn main() -> Result<(), Error> {
         (@arg path: -p <PATH> --path default_value("playground/examples") "path to database")
         (@arg group_by: -g <GROUP_BY> --group_by default_value("day") "group by")
         (@arg limit: -l <LIMIT> --limit default_value("1000") "max number of rows")
+        (@arg samples: -s <SAMPLES> --samples default_value("10") "samples")
     )
     .get_matches();
 
@@ -35,13 +36,26 @@ fn main() -> Result<(), Error> {
 
     let series_table = series_table::create(env::create(file_system::open(path)?))?;
 
-    let start_ts = time::Instant::now();
-    let rows = query(
-        series_table.reader("t").unwrap(),
-        matches.value_of("group_by").unwrap(),
-        matches.value_of("limit").unwrap(),
-    )?;
-    log::debug!("Rows {} in {}ms", rows, start_ts.elapsed().as_millis());
+    let samples = matches
+        .value_of("samples")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+
+    for sample in 0..samples {
+        let start_ts = time::Instant::now();
+        let rows = query(
+            series_table.reader("t").unwrap(),
+            matches.value_of("group_by").unwrap(),
+            matches.value_of("limit").unwrap(),
+        )?;
+        log::debug!(
+            "[{}] Rows {} in {}ms",
+            sample + 1,
+            rows,
+            start_ts.elapsed().as_millis()
+        );
+    }
 
     Ok(())
 }
