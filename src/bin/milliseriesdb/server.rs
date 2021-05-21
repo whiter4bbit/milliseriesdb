@@ -173,7 +173,7 @@ mod restapi {
 
             loop {
                 let batch = entries
-                    .take(1024 * 1024)
+                    .take(10)
                     .collect::<Result<Vec<Entry>, ()>>()
                     .map_err(|_| io::Error::new(io::ErrorKind::Other, "Can not read entries"))?;
 

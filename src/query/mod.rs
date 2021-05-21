@@ -4,18 +4,15 @@ mod into_entries_iter;
 mod query;
 mod statement;
 mod statement_expr;
+mod round;
 
 pub use aggregation::Aggregation;
 pub use query::{QueryBuilder, Row};
 pub use statement::Statement;
 pub use statement_expr::StatementExpr;
-//   |       |       |        |      |
-// -20      -10      0       10      20
-//              ^
-//              6
-//
+
 #[cfg(test)]
-mod test_queries {
+mod test {
     use super::*;
     use crate::storage::{error::Error, series_table, Entry};
     use chrono::{TimeZone, Utc};
@@ -27,39 +24,6 @@ mod test_queries {
             .timestamp_millis()
     }
 
-    fn from_utc_millis(ts: i64) -> String {
-        Utc.timestamp_millis(ts).format("%F %H:%M").to_string()
-    }
-
-    fn round_millis(ts: i64, to: i64) -> i64 {
-        if ts < 0 {
-            -round_millis(ts.abs() + to, to)
-        } else {
-            (ts / to) * to
-        }
-    }
-
-    fn group_key(ts: &str, by: i64) -> String {
-        from_utc_millis(round_millis(utc_millis(ts), by))
-    }
-
-    #[test]
-    fn test_the_first_day() {
-        println!("{:?}", from_utc_millis(i64::MIN / 2));
-    }
-
-    #[test]
-    #[rustfmt::skip]
-    fn test_group_key() {
-        assert_eq!("1972-01-01 22:00", &group_key("1972-01-01 22:00", 60 * 60 * 1000));
-        assert_eq!("1972-01-01 22:00", &group_key("1972-01-01 22:33", 60 * 60 * 1000));
-        assert_eq!("1972-01-01 22:00", &group_key("1972-01-01 22:59", 60 * 60 * 1000));
-
-        assert_eq!("1962-01-01 22:00", &group_key("1962-01-01 22:00", 60 * 60 * 1000));
-        assert_eq!("1962-01-01 22:00", &group_key("1962-01-01 22:33", 60 * 60 * 1000));        
-        assert_eq!("1962-01-01 22:00", &group_key("1962-01-01 22:59", 60 * 60 * 1000));
-    }
-
     fn entry(ts: &str, value: f64) -> Entry {
         Entry {
             ts: utc_millis(ts),
@@ -67,8 +31,11 @@ mod test_queries {
         }
     }
 
-    fn as_tuple(row: &Row) -> (String, Aggregation) {
-        (from_utc_millis(row.ts), row.values[0].clone())
+    fn row(ts: &str, agg: Aggregation) -> Row {
+        Row {
+            ts: utc_millis(ts),
+            values: vec![agg],
+        }
     }
 
     #[test]
@@ -91,7 +58,7 @@ mod test_queries {
 
         let reader = table.reader("series-1").unwrap();
 
-        let rows = reader
+        let rows: Vec<Row> = reader
             .query(
                 StatementExpr {
                     from: "1961-01-02".to_string(),
@@ -103,15 +70,14 @@ mod test_queries {
                 .unwrap(),
             )
             .rows()?
-            .iter()
-            .map(|row| as_tuple(row))
-            .collect::<Vec<(String, Aggregation)>>();
+            .into_iter()
+            .collect();
 
         assert_eq!(
             vec![
-                ("1961-01-02 11:00".to_string(), Aggregation::Mean(3.0)),
-                ("1961-01-02 12:00".to_string(), Aggregation::Mean(6.0)),
-                ("1971-01-02 12:00".to_string(), Aggregation::Mean(6.0)),
+                row("1961-01-02 11:00", Aggregation::Mean(3.0)),
+                row("1961-01-02 12:00", Aggregation::Mean(6.0)),                
+                row("1971-01-02 12:00", Aggregation::Mean(6.0)),
             ],
             rows
         );

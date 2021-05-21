@@ -1,17 +1,24 @@
 use super::aggregation::{Aggregation, AggregatorsFolder};
-use super::into_entries_iter::IntoEntriesIter;
-use crate::storage::error::Error;
-use serde_derive::{Deserialize, Serialize};
-use super::statement::Statement;
-use std::time::SystemTime;
 use super::group_by::GroupBy;
+use super::into_entries_iter::IntoEntriesIter;
+use super::statement::Statement;
+use super::round::round_to;
+use crate::storage::{error::Error, Entry};
+use serde_derive::{Deserialize, Serialize};
 use std::convert::From;
+use std::time::SystemTime;
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Row {
     pub ts: i64,
     pub values: Vec<Aggregation>,
+}
+
+#[cfg(test)]
+impl PartialEq<Row> for Row {
+    fn eq(&self, other: &Row) -> bool {
+        self.ts == other.ts && self.values == other.values
+    }
 }
 
 impl From<(i64, Vec<Aggregation>)> for Row {
@@ -52,12 +59,14 @@ where
     pub fn rows(self) -> Result<Vec<Row>, Error> {
         let folder = AggregatorsFolder::new(&self.statement.aggregators);
 
+        let granularity = self.statement.group_by as i64;
+
         let group_by = &mut GroupBy {
             iterator: self.into_iterator.into_iter(self.statement.from)?,
             folder: folder,
             current: None,
             iterations: 0,
-            granularity: self.statement.group_by,
+            key: { |e: &Entry| round_to(e.ts, granularity) },
         };
 
         let start_ts = SystemTime::now();
@@ -85,55 +94,5 @@ where
         tokio::task::spawn_blocking(move || self.rows())
             .await
             .unwrap()
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::storage::Entry;
-    use super::super::aggregation::Aggregator;
-    use super::*;
-
-    #[test]
-    fn test_query() {
-        let series = vec![
-            Entry { ts: 0, value: 1.0 },
-            Entry { ts: 1, value: 4.0 },
-            Entry { ts: 3, value: 6.0 },
-            Entry { ts: 6, value: 1.0 },
-            Entry { ts: 10, value: 9.0 },
-            Entry { ts: 15, value: 4.0 },
-            Entry { ts: 16, value: 2.0 },
-        ];
-
-        let result = series
-            .query(Statement {
-                from: 0,
-                group_by: 10,
-                aggregators: vec![Aggregator::Mean],
-                limit: 100,
-            })
-            .rows()
-            .unwrap();
-
-        assert_eq!(2, result.len());
-        assert_eq!(0, result[0].ts);
-        assert_eq!(10, result[1].ts);
-
-        assert_eq!(
-            true,
-            match result[0].values[0] {
-                Aggregation::Mean(value) => (value - 3.0).abs() <= 10e-6,
-                _ => false,
-            }
-        );
-
-        assert_eq!(
-            true,
-            match result[1].values[0] {
-                Aggregation::Mean(value) => (value - 5.0).abs() <= 10e-6,
-                _ => false,
-            }
-        )
     }
 }

@@ -37,12 +37,12 @@ fn query(reader: Arc<SeriesReader>) -> Result<(), Error> {
                 from: "-9223372036854775808".to_string(),
                 group_by: "day".to_string(),
                 aggregators: "mean".to_string(),
-                limit: "10000".to_string(),
+                limit: "1000".to_string(),
             })
             .unwrap(),
         )
         .rows()?;
-    log::debug!("query rows: {}", rows.len());
+    log::debug!("Query rows: {}", rows.len());
     Ok(())
 }
 
