@@ -173,7 +173,7 @@ mod restapi {
 
             loop {
                 let batch = entries
-                    .take(10)
+                    .take(1024 * 1024)
                     .collect::<Result<Vec<Entry>, ()>>()
                     .map_err(|_| io::Error::new(io::ErrorKind::Other, "Can not read entries"))?;
 
@@ -183,7 +183,7 @@ mod restapi {
 
                 entries_count += batch.len();
 
-                writer.append_async(batch).await?;
+                writer.append_with_batch_size_async(10, batch).await?;
 
                 log::debug!("Imported {} entries", entries_count);
             }
