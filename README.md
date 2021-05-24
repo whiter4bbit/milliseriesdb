@@ -13,13 +13,13 @@ Oversimplified time series database. I created one for personal use only. The ma
 The system assumes that the data to be appended is already sorted. Data is consumed in batches (see api). Each batch is sorted and filtered to filter out entries with timestamp lower than the maximum timestamp of the series.
 
 The flow:
-* Batch is compressed using a set of supported compression algorithms.
-* Batch is written into the data file at offset the last commit is pointing to
-* Index entry for the batch is written into index file at offset the last commit is pointing to
+* Batch is compressed (currently delta-compression is used).
+* Batch is written into the data file at offset the last commit is points to
+* Index entry for the batch is written into index file at offset the last commit is points to
 * Batch and index files are fsynced
-* Commit (`(block_offset + len(block), index_offset + len(index_entry), highest_ts of the block)`) is appended to the commit log and fsynced
+* Commit `(block_offset + len(block), index_offset + len(index_entry), highest_ts of the block)` is appended to the commit log and fsynced
 
-### Read Path
+## Read Path
 
 ...
 
