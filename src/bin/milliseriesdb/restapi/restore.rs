@@ -76,7 +76,7 @@ where
             &series_name,
             &name
         );
-        return Err(warp::reject::custom(SeriesAlreadyExist{}));
+        return Err(warp::reject::custom(SeriesAlreadyExist {}));
     }
 
     Ok(StatusCode::OK)
