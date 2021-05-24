@@ -9,23 +9,24 @@ Oversimplified time series database. I use it to collect and query to the temper
 Data is collected in batches and stored in corresponding `series`:
 
 ```
-POST http://localhost:8080/series/t/
+cat <<EOF | http POST ':8080/series/t'
 {
  "entries": [
      {
-         "ts": "1621890712512",
-         "value": "23.0"
+         "ts": 1621890712512,
+         "value": 23.0
      },
      {
-         "ts": "1621890714512",
-         "value": "24.0"
+         "ts": 1621890714512,
+         "value": 24.0
      },
      {
-         "ts": "1621890715512",
-         "value": "26.0"
+         "ts": 1621890715512,
+         "value": 26.0
      }
  ]
 }
+EOF
 ```
 
 Upon receiving the batch is sorted by timestamp in non-decreasing order and all entries that are higher that the last entry in the series is filtered out. That is, milliseriesdb assumes that the data send in non-decreasing order.
@@ -133,11 +134,11 @@ EOF
 ### Query
 
 ```
-http ':8080' from==2019-08-01 group_by==hour aggregators==mean\,min\,max limit==1000
+http ':8080/series/t' from==2019-08-01 group_by==hour aggregators==mean\,min\,max limit==1000
 ```
 
-* `group_by` - `hour|minute|day`
-* `aggregators` = `mean,min,max`
+* `group_by` `hour`, `minute` or `day`
+* `aggregators` `mean,min,max`
 
 ### Export
 
