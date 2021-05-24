@@ -4,6 +4,8 @@
 
 Oversimplified time series database. I use it to collect and query to the temperature and co2 metrics sent by [co2-monitor](https://github.com/whiter4bbit/co2-monitor).
 
+## Overview
+
 Data is collected in batches and stored in corresponding `series`:
 
 ```
@@ -75,6 +77,85 @@ Result:
 }
 ```
 
+## Getting Started
+
+Build manually:
+
+```
+cargo build --relase
+```
+
+Run:
+
+```
+target/release/milliseriesdb -p path/ server -a "0.0.0.0:8080"
+```
+
+Use docker container:
+```
+docker run -p 8080:8080 -v $(pwd)/path:/path whiter4bbit/milliseriesdb:latest -p /path server -a '0.0.0.0:8080'
+```
+
+## API
+
+### Create series
+
+```
+PUT http://localhost:8080/series/t
+```
+
+### Append entries
+
+```
+POST http://localhost:8080/series/t/
+{
+ "entries": [
+     {
+         "ts": "1621890712512",
+         "value": "23.0"
+     },
+     {
+         "ts": "1621890714512",
+         "value": "24.0"
+     },
+     {
+         "ts": "1621890715512",
+         "value": "26.0"
+     }
+ ]
+}
+```
+
+* `ts` is timestamp, i64
+* `value` is f64
+
+### Query
+
+```
+http ':8080' from==2019-08-01 group_by==hour aggregators==mean\,min\,max limit==1000
+```
+
+* `group_by` - `hour|minute|day`
+* `aggregators` = `mean,min,max`
+
+### Export
+
+Export series in csv format (`i64; f32`)
+
+```
+http http://localhost:8080/series/t/export
+```
+
+### Restore
+
+Restore series from csv format (`i64; f32`)
+
+```
+gzcat t.csv.gz | http ':8080/series/t/restore'
+```
+
+If it does exist already, then error will be returned.
+
 ## Storage
 
 Each series is stored in separate directory `{db_path}/{series_name}`. Incoming batch of entries is compressed and appended to data file (as `block`) `series.dat`. For each block index entry is created (`highest ts of the block -> block offset`). Index is stored in `series.idx` and mmaped. 
@@ -83,19 +164,19 @@ Commit log is used to maintain consistency. Each entry from commit log represent
 * `data_offset: u32` - offset points to the end of last appended block in `series.dat`. The next block is written at this offset
 * `index_offset: u32` - offset points to the end of last appended index entry in `series.idx`. The next index entry is written at this offset
 * `highest_ts: i64` - highest timestamp of the series. Used to filter out incoming entries
+* `crc16: u16`
 
-After data and index files are updated and fsynced, the new commit log entry is created. Commit log is rotated (every 2Mb). Each commit log entry contains crc16 sum.
+After data and index files are updated and fsynced, the new commit log entry is created. Commit log is rotated (every 2Mb).
 
 When the data is queried, last (valid) commit log entry is read. Only index entries before `commit.index_offset` and data blocks before `commit.data_offset` are considered. 
 
-Ceiling block offset for the queried timestamp is located using binary search in the index.
+Binary search by index file is used to find the starting block.
 
-### Files
+### File format
 
-Each series is stored in three files:
- * `/{series_name}/series.dat` - data file
- * `/{series_name}/series.idx` - index file
- * `/{series_name}/series.log.{0,1,2,3...}` - rotated commit log file
+ * `/{series_name}/series.dat`
+ * `/{series_name}/series.idx`
+ * `/{series_name}/series.log.{0,1,2,3...}`
 
 Numbers (u32, u64, etc..) are encoded in `bigendian`.
 
