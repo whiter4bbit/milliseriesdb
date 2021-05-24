@@ -7,6 +7,7 @@ mod append;
 mod export;
 mod query;
 mod server;
+mod restapi;
 
 #[tokio::main]
 async fn main() {
