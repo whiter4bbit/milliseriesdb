@@ -107,23 +107,24 @@ PUT http://localhost:8080/series/t
 ### Append entries
 
 ```
-POST http://localhost:8080/series/t/
+cat <<EOF | http POST ':8080/series/t'
 {
  "entries": [
      {
-         "ts": "1621890712512",
-         "value": "23.0"
+         "ts": 1621890712512,
+         "value": 23.0
      },
      {
-         "ts": "1621890714512",
-         "value": "24.0"
+         "ts": 1621890714512,
+         "value": 24.0
      },
      {
-         "ts": "1621890715512",
-         "value": "26.0"
+         "ts": 1621890715512,
+         "value": 26.0
      }
  ]
 }
+EOF
 ```
 
 * `ts` is timestamp, i64
@@ -143,7 +144,7 @@ http ':8080' from==2019-08-01 group_by==hour aggregators==mean\,min\,max limit==
 Export series in csv format (`i64; f32`)
 
 ```
-http http://localhost:8080/series/t/export
+http ':8080/series/t/export' | gzip > t.csv.gz
 ```
 
 ### Restore
