@@ -180,6 +180,8 @@ Returns `409` if series already exists
 
 ## Storage
 
+![Storage](images/storage-highlevel.png)
+
 Each series is stored in separate directory `{db_path}/{series_name}`. The incoming batch of entries is compressed and appended to the data file (as `block`) `series.dat`. For each block index entry is created (`highest ts of the block -> block offset`). The index is stored in `series. idx` and mmaped. 
 
 Commit log is used to maintain consistency. Each entry from the commit log represents:
@@ -200,7 +202,7 @@ A binary search by index file is used to find the starting block.
  * `/{series_name}/series.idx`
  * `/{series_name}/series.log.{0,1,2,3...}`
 
-Numbers (u32, u64, etc..) are encoded in `bigendian`.
+Numbers (u32, u16, u8, etc..) are encoded in `bigendian`.
 
 #### Data file
  
@@ -241,13 +243,13 @@ Index file stores entry as pair `(highest_ts, block_start_offset)` for each bloc
 
 ```
 +-------------------+---------------+
-| highest_ts: i64   | offset: u64   |
+| highest_ts: i64   | offset: u32   |
 +-------------------+---------------+
-| highest_ts: i64   | offset: u64   |
+| highest_ts: i64   | offset: u32   |
 +-------------------+---------------+
 ...
 +-------------------+---------------+
-| highest_ts: i64   | offset: u64   |
+| highest_ts: i64   | offset: u32   |
 +-------------------+---------------+
 ```
 
