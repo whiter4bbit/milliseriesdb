@@ -3,7 +3,6 @@ use milliseriesdb::storage::{file_system, env, series_table};
 use std::sync::Arc;
 
 mod server;
-mod restapi;
 
 #[tokio::main]
 async fn main() {

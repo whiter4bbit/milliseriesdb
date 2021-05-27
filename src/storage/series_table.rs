@@ -1,6 +1,7 @@
 use super::env::Env;
 use super::error::Error;
 use super::{SeriesReader, SeriesWriter};
+use super::super::failpoints::failpoint;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time;
@@ -38,6 +39,12 @@ impl SeriesTable {
         if entries.contains_key(name.as_ref()) {
             return Ok(());
         }
+
+        failpoint!(
+            self.env.fp,
+            "series_table::create",
+            Err(Error::Io(std::io::Error::new(std::io::ErrorKind::WriteZero, "fp")))
+        );
 
         let entry = TableEntry::open_or_create(&self.env, &name)?;
         entries.insert(name.as_ref().to_owned(), Arc::new(entry));
@@ -100,7 +107,7 @@ pub mod test {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     pub struct TempSeriesTable {
-        pub series_table: SeriesTable,
+        pub series_table: Arc<SeriesTable>,
         path: PathBuf,
     }
 
@@ -118,6 +125,10 @@ pub mod test {
     }
 
     pub fn create() -> Result<TempSeriesTable, Error> {
+        create_with_failpoints(Arc::new(Failpoints::create()))
+    }
+
+    pub fn create_with_failpoints(fp: Arc<Failpoints>) -> Result<TempSeriesTable, Error> {
         let path = PathBuf::from(format!(
             "temp-dir-{:?}",
             SystemTime::now()
@@ -127,10 +138,10 @@ pub mod test {
         ));
 
         Ok(TempSeriesTable {
-            series_table: super::create(env::create(
+            series_table: Arc::new(super::create(env::create(
                 file_system::open(path.clone())?,
-                Arc::new(Failpoints::create()),
-            ))?,
+                fp,
+            ))?),
             path: path.clone(),
         })
     }

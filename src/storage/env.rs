@@ -53,7 +53,7 @@ pub struct Env {
     fs: FileSystem,
     series: Arc<Mutex<HashMap<String, Arc<SeriesEnv>>>>,
     #[cfg(test)]
-    fp: Arc<Failpoints>,
+    pub fp: Arc<Failpoints>,
 }
 
 impl Env {

@@ -1,11 +1,11 @@
+use crate::buffering::BufferingBuilder;
+use crate::storage::{error::Error, Entry, SeriesReader, SeriesTable};
 use hyper::body::{Body, Bytes, Sender};
-use milliseriesdb::buffering::BufferingBuilder;
-use milliseriesdb::storage::{error::Error, Entry, SeriesReader, SeriesTable};
 use std::io;
 use std::sync::Arc;
-use warp::reject::{Reject, Rejection};
-use warp::Filter;
 use warp::http::Response;
+use warp::reject::Rejection;
+use warp::Filter;
 
 async fn export_entries(reader: Arc<SeriesReader>, sender: &mut Sender) -> io::Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<Entry>>(1);
@@ -44,18 +44,10 @@ async fn export_entries(reader: Arc<SeriesReader>, sender: &mut Sender) -> io::R
     Ok(())
 }
 
-#[derive(Debug)]
-struct UnexpectedError {}
-
-impl Reject for UnexpectedError {}
-
-async fn export(
-    name: String,
-    series_table: Arc<SeriesTable>,
-) -> Result<Response<Body>, Rejection> {
+async fn export(name: String, series_table: Arc<SeriesTable>) -> Result<Response<Body>, Rejection> {
     let reader = series_table
-        .reader(name)
-        .ok_or_else(|| warp::reject::not_found())?;
+        .reader(&name)
+        .ok_or_else(|| super::error::not_found(&name))?;
 
     let (mut sender, body) = Body::channel();
 
@@ -71,7 +63,7 @@ async fn export(
 
     Response::builder()
         .body(body)
-        .map_err(|_| warp::reject::custom(UnexpectedError {}))
+        .map_err(|_| super::error::internal(Error::Other("can not build the request".to_owned())))
 }
 
 pub fn filter(series_table: Arc<SeriesTable>) -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
@@ -79,5 +71,47 @@ pub fn filter(series_table: Arc<SeriesTable>) -> warp::filters::BoxedFilter<(imp
         .and(warp::get())
         .and(super::with_series_table(series_table.clone()))
         .and_then(self::export)
+        .recover(super::error::handle)
         .boxed()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::failpoints::Failpoints;
+    use crate::storage::error::Error;
+    use crate::storage::series_table;
+    use warp::http::StatusCode;
+
+    #[tokio::test]
+    async fn test_export() -> Result<(), Error> {
+        let fp = Arc::new(Failpoints::create());
+        let series_table = series_table::test::create_with_failpoints(fp.clone())?;
+
+        let resp = warp::test::request()
+            .method("GET")
+            .path("/series/t/export")
+            .reply(&super::filter(series_table.series_table.clone()))
+            .await;
+
+        assert_eq!(StatusCode::NOT_FOUND, resp.status());
+
+        series_table.create("t")?;
+
+        series_table.writer("t").unwrap().append(&vec![
+            Entry {ts: 1, value: 1.2},
+            Entry {ts: 2, value: 3.1},
+        ])?;
+
+        let resp = warp::test::request()
+            .method("GET")
+            .path("/series/t/export")
+            .reply(&super::filter(series_table.series_table.clone()))
+            .await;
+
+        assert_eq!(StatusCode::OK, resp.status());
+        assert_eq!("1; 1.20\n2; 3.10\n", std::str::from_utf8(&resp.body()).unwrap());
+
+        Ok(())
+    }
 }

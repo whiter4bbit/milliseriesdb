@@ -1,9 +1,9 @@
 use milliseriesdb::storage::SeriesTable;
+use milliseriesdb::restapi;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use warp::Filter;
-use super::restapi;
 
 pub async fn start_server(series_table: Arc<SeriesTable>, addr: SocketAddr) -> io::Result<()> {
     let server_api = restapi::create::filter(series_table.clone())
