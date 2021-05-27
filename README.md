@@ -4,6 +4,22 @@
 
 Oversimplified time-series database. I use it to collect and query the temperature and co2 metrics sent by [co2-monitor](https://github.com/whiter4bbit/co2-monitor).
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Getting Started](#getting-started)
+- [API](#api)
+  - [Create Series](#create-series)
+  - [Append Entries](#append-entries)
+  - [Query](#query)
+  - [Export](#export)
+  - [Restore](#restore)
+- [Storage](#storage)
+  - [Directory structure](#directory-structure)
+  - [Data file](#data-file)
+  - [Index file](#index-file) 
+  - [Commit log](#commit-log) 
+
 ## Overview
 
 Data is collected in batches and stored in corresponding `series`:
@@ -176,7 +192,7 @@ When the data is queried, the last (valid) commit log entry is read. Only index 
 
 A binary search by index file is used to find the starting block.
 
-### File format
+### Directory structure
 
  * `/{series_name}/series.dat`
  * `/{series_name}/series.idx`
