@@ -74,3 +74,8 @@ GET http://localhost:8080/series/t
     &group_by=hour
     &aggregators=mean
     &limit=1000
+
+
+####
+
+PUT http://localhost:8080/series/kk
