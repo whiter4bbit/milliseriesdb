@@ -200,7 +200,7 @@ A binary search by index file is used to find the starting block.
  * `/{series_name}/series.idx`
  * `/{series_name}/series.log.{0,1,2,3...}`
 
-Numbers (u32, u64, etc..) are encoded in `bigendian`.
+Numbers (u32, u16, u8, etc..) are encoded in `bigendian`.
 
 #### Data file
  
@@ -241,13 +241,13 @@ Index file stores entry as pair `(highest_ts, block_start_offset)` for each bloc
 
 ```
 +-------------------+---------------+
-| highest_ts: i64   | offset: u64   |
+| highest_ts: i64   | offset: u32   |
 +-------------------+---------------+
-| highest_ts: i64   | offset: u64   |
+| highest_ts: i64   | offset: u32   |
 +-------------------+---------------+
 ...
 +-------------------+---------------+
-| highest_ts: i64   | offset: u64   |
+| highest_ts: i64   | offset: u32   |
 +-------------------+---------------+
 ```
 
