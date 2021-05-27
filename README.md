@@ -4,6 +4,8 @@
 
 Oversimplified time-series database. I use it to collect and query the temperature and co2 metrics sent by [co2-monitor](https://github.com/whiter4bbit/co2-monitor).
 
+**I only tested this in my personal environment and can not claim that will work well for the other use-cases / environments.**
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -16,9 +18,9 @@ Oversimplified time-series database. I use it to collect and query the temperatu
   - [Restore](#restore)
 - [Storage](#storage)
   - [Directory structure](#directory-structure)
-  - [Data file](#data-file)
-  - [Index file](#index-file) 
-  - [Commit log](#commit-log) 
+    - [Data file](#data-file)
+    - [Index file](#index-file) 
+    - [Commit log](#commit-log)
 
 ## Overview
 
