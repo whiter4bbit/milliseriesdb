@@ -4,12 +4,37 @@ use crate::storage::error::Error;
 use crate::storage::{Entry, SeriesTable, SeriesWriter};
 use bytes::buf::Buf;
 use futures::{Stream, StreamExt};
-use std::io;
 use std::sync::Arc;
 use warp::reject::Rejection;
 use warp::{http::StatusCode, Filter};
 
-async fn import_entries<S, B>(body: S, writer: Arc<SeriesWriter>) -> io::Result<()>
+enum ImportError {
+    Parse(String),
+    Internal(Error),
+}
+
+impl From<Error> for ImportError {
+    fn from(err: Error) -> ImportError {
+        ImportError::Internal(err)
+    }
+}
+
+impl From<Error> for Rejection {
+    fn from(err: Error) -> Rejection {
+        super::error::internal(err)
+    }
+}
+
+impl From<ImportError> for Rejection {
+    fn from(err: ImportError) -> Rejection {
+        match err {
+            ImportError::Parse(reason) => super::error::bad_request(reason),
+            ImportError::Internal(reason) => super::error::internal(reason),
+        }
+    }
+}
+
+async fn import_entries<S, B>(body: S, writer: Arc<SeriesWriter>) -> Result<(), ImportError>
 where
     S: Stream<Item = Result<B, warp::Error>> + Send + 'static + Unpin,
     B: Buf + Send,
@@ -22,8 +47,7 @@ where
             .read(&mut chunk)
             .buffering::<Result<Vec<Entry>, ()>>(1024 * 1024)
         {
-            let batch =
-                batch.map_err(|_| io::Error::new(io::ErrorKind::Other, "Can not read entries"))?;
+            let batch = batch.map_err(|_| ImportError::Parse("invalid csv".to_owned()))?;
 
             entries_count += batch.len();
 
@@ -45,26 +69,18 @@ where
     S: Stream<Item = Result<B, warp::Error>> + Send + 'static + Unpin,
     B: Buf + Send,
 {
-    let series_name = series_table
-        .create_temp()
-        .map_err(|err| super::error::internal(err))?;
+    let series_name = series_table.create_temp()?;
 
     let writer = series_table.writer(&series_name).ok_or_else(|| {
-        super::error::internal(Error::Other(format!(
+        Error::Other(format!(
             "can not open temp series: {}",
             &series_name
-        )))
+        ))
     })?;
 
-    import_entries(body, writer)
-        .await
-        .map_err(|err| super::error::internal(Error::Io(err)))?;
+    import_entries(body, writer).await?;
 
-    let renamed = series_table
-        .rename(&series_name, &name)
-        .map_err(|err| super::error::internal(err))?;
-
-    if !renamed {
+    if !series_table.rename(&series_name, &name)? {
         #[rustfmt::skip]
         log::warn!("can not restore series '{}' -> '{}', conflict", &series_name, &name);
         return Err(super::error::conflict(&name));
@@ -96,12 +112,10 @@ mod test {
         let fp = Arc::new(Failpoints::create());
         let series_table = series_table::test::create_with_failpoints(fp.clone())?;
 
-        let valid_csv = "1; 12.3\n3; 13.4\n";
-
         let resp = warp::test::request()
             .method("POST")
             .path("/series/t/restore")
-            .body(valid_csv)
+            .body("1; 12.3\n3; 13.4\n")
             .reply(&super::filter(series_table.series_table.clone()))
             .await;
 
@@ -121,6 +135,15 @@ mod test {
             ],
             entries
         );
+
+        let resp = warp::test::request()
+            .method("POST")
+            .path("/series/t/restore")
+            .body("1xx 12.3\n3; 13.4\n")
+            .reply(&super::filter(series_table.series_table.clone()))
+            .await;
+
+        assert_eq!(StatusCode::BAD_REQUEST, resp.status());
 
         Ok(())
     }
