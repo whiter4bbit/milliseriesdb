@@ -2,14 +2,14 @@
 
 # milliseriesdb
 
-Oversimplified time series database. I use it to collect and query to the temperature and co2 metrics sent by [co2-monitor](https://github.com/whiter4bbit/co2-monitor).
+Oversimplified time-series database. I use it to collect and query the temperature and co2 metrics sent by [co2-monitor](https://github.com/whiter4bbit/co2-monitor).
 
 ## Overview
 
 Data is collected in batches and stored in corresponding `series`:
 
-```
-cat <<EOF | http POST ':8080/series/t'
+```bash
+cat <<EOF | http POST ":8080/series/t"
 {
  "entries": [
      {
@@ -29,21 +29,17 @@ cat <<EOF | http POST ':8080/series/t'
 EOF
 ```
 
-Upon receiving the batch is sorted by timestamp in non-decreasing order and all entries that are higher that the last entry in the series is filtered out. That is, milliseriesdb assumes that the data send in non-decreasing order.
+Upon receiving the batch is sorted by timestamp in non-decreasing order and all entries that are lower than the last entry in the series are filtered out. That is, milliseriesdb assumes that the data send in non-decreasing order.
 
 Query pattern:
 
 ```
-GET http://localhost:8080/series/t
-    ?from=2019-08-01
-    &group_by=hour
-    &aggregators=mean,min,max
-    &limit=1000
+http ":8080/series/t" from==2019-08-01 group_by==hour aggregators==mean\,min\,max limit==1000
 ```
 
 Result: 
 
-```
+```json
 {
   "rows": [
     {
@@ -82,18 +78,18 @@ Result:
 
 Build manually:
 
-```
+```bash
 cargo build --relase
 ```
 
 Run:
 
-```
+```bash
 target/release/milliseriesdb -p path/ server -a "0.0.0.0:8080"
 ```
 
 Use docker container:
-```
+```bash
 docker run -p 8080:8080 -v $(pwd)/path:/path whiter4bbit/milliseriesdb:latest -p /path server -a '0.0.0.0:8080'
 ```
 
@@ -101,13 +97,13 @@ docker run -p 8080:8080 -v $(pwd)/path:/path whiter4bbit/milliseriesdb:latest -p
 
 ### Create series
 
-```
+```bash
 PUT http://localhost:8080/series/t
 ```
 
 ### Append entries
 
-```
+```bash
 cat <<EOF | http POST ':8080/series/t'
 {
  "entries": [
@@ -131,48 +127,54 @@ EOF
 * `ts` is timestamp, i64
 * `value` is f64
 
+Returns `404` if series doesn't exist
+
 ### Query
 
-```
+```bash
 http ':8080/series/t' from==2019-08-01 group_by==hour aggregators==mean\,min\,max limit==1000
 ```
 
 * `group_by` `hour`, `minute` or `day`
 * `aggregators` `mean,min,max`
 
+Returns `404` if series doesn't exist
+
 ### Export
 
 Export series in csv format (`i64; f32`)
 
-```
+```bash
 http ':8080/series/t/export' | gzip > t.csv.gz
 ```
 
+Returns `404` is series doesn't exist
+
 ### Restore
 
-Restore series from csv format (`i64; f32`)
+Restore series from CSV format (`i64; f32`)
 
-```
+```bash
 gzcat t.csv.gz | http ':8080/series/t/restore'
 ```
 
-If it does exist already, then error will be returned.
+Returns `409` if series already exists
 
 ## Storage
 
-Each series is stored in separate directory `{db_path}/{series_name}`. Incoming batch of entries is compressed and appended to data file (as `block`) `series.dat`. For each block index entry is created (`highest ts of the block -> block offset`). Index is stored in `series.idx` and mmaped. 
+Each series is stored in separate directory `{db_path}/{series_name}`. The incoming batch of entries is compressed and appended to the data file (as `block`) `series.dat`. For each block index entry is created (`highest ts of the block -> block offset`). The index is stored in `series. idx` and mmaped. 
 
-Commit log is used to maintain consistency. Each entry from commit log represents:
-* `data_offset: u32` - offset points to the end of last appended block in `series.dat`. The next block is written at this offset
+Commit log is used to maintain consistency. Each entry from the commit log represents:
+* `data_offset: u32` - offset points to the end of the last appended block in `series.dat`. The next block is written at this offset
 * `index_offset: u32` - offset points to the end of last appended index entry in `series.idx`. The next index entry is written at this offset
 * `highest_ts: i64` - highest timestamp of the series. Used to filter out incoming entries
 * `crc16: u16`
 
 After data and index files are updated and fsynced, the new commit log entry is created. Commit log is rotated (every 2Mb).
 
-When the data is queried, last (valid) commit log entry is read. Only index entries before `commit.index_offset` and data blocks before `commit.data_offset` are considered. 
+When the data is queried, the last (valid) commit log entry is read. Only index entries before `commit.index_offset` and data blocks before `commit.data_offset` are considered. 
 
-Binary search by index file is used to find the starting block.
+A binary search by index file is used to find the starting block.
 
 ### File format
 
@@ -213,7 +215,7 @@ Decoded payload has the following format:
 +----------------+------------+  /
 ```
 
-Entries within block are stored in non-decreasing order by timestamp. The ordering between blocks in maintained non-decreasing as well, so the last entry of the block `i` is not bigger than the first entry of the block `i + 1`.
+Entries within the block are stored in non-decreasing order by timestamp. The ordering between blocks is maintained non-decreasing as well, so the last entry of the block `i` is not bigger than the first entry of the block `i + 1`.
 
 #### Index file
 
@@ -231,7 +233,7 @@ Index file stores entry as pair `(highest_ts, block_start_offset)` for each bloc
 +-------------------+---------------+
 ```
 
-Entries within index are stored in non-decreasing order by timestamp.
+Entries within the index are stored in non-decreasing order by timestamp.
 
 #### Commit Log
 
@@ -244,4 +246,4 @@ Commit log contains entries of the following format:
 ...
 ```
 
-Each entry corresponds to the committed offset of data file, index_file and highest timestamp of the last block in data file.
+Each entry corresponds to the committed offset of the data file, index_file, and highest timestamp of the last block in a data file.
