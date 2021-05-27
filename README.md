@@ -180,6 +180,8 @@ Returns `409` if series already exists
 
 ## Storage
 
+![Storage](images/storage-highlevel.png)
+
 Each series is stored in separate directory `{db_path}/{series_name}`. The incoming batch of entries is compressed and appended to the data file (as `block`) `series.dat`. For each block index entry is created (`highest ts of the block -> block offset`). The index is stored in `series. idx` and mmaped. 
 
 Commit log is used to maintain consistency. Each entry from the commit log represents:
